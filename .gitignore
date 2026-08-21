@@ -1,3 +1,9 @@
 
 n8n_data/
 n8n_data_backup/
+
+n8n_data/
+n8n_data_backup/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
