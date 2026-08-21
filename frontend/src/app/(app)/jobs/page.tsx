@@ -25,7 +25,7 @@ type Job = {
   title: string | null;
   location: string | null;
   company_id: string | null;
-  company: Company | null;
+  companies: Company | null;
 };
 
 export type JobMatch = {
@@ -37,24 +37,6 @@ export type JobMatch = {
   profile_id: string | null;
   job_id: string | null;
   jobs: Job | null;
-};
-
-type RawJob = {
-  id: string;
-  title: string | null;
-  location: string | null;
-  company_id: string | null;
-};
-
-type RawJobMatch = {
-  id: number;
-  score: number | null;
-  matched_skills: string[] | string | null;
-  missing_skills: string[] | string | null;
-  ai_summary: string | null;
-  profile_id: string | null;
-  job_id: string | null;
-  jobs: RawJob | RawJob[] | null;
 };
 
 export default function JobsPage() {
@@ -70,7 +52,7 @@ export default function JobsPage() {
       const supabase = createClient();
 
       // ==========================================
-      // 1. UTILISATEUR CONNECTÉ
+      // 1. Vérifier l'utilisateur connecté
       // ==========================================
 
       const {
@@ -101,7 +83,7 @@ export default function JobsPage() {
       );
 
       // ==========================================
-      // 2. PROFIL
+      // 2. Vérifier le profil
       // ==========================================
 
       const {
@@ -129,10 +111,7 @@ export default function JobsPage() {
       );
 
       // ==========================================
-      // 3. JOB_MATCHES + JOBS
-      //
-      // IMPORTANT :
-      // Aucun JOIN avec companies ici.
+      // 3. Récupérer les job_matches
       // ==========================================
 
       const {
@@ -152,7 +131,16 @@ export default function JobsPage() {
             id,
             title,
             location,
-            company_id
+            company_id,
+            companies (
+              id,
+              name,
+              city,
+              country,
+              industry,
+              logo_url,
+              website
+            )
           )
         `)
         .eq("profile_id", profileId)
@@ -171,165 +159,15 @@ export default function JobsPage() {
         );
       }
 
-      const rawMatches =
-        (matchesData ?? []) as unknown as RawJobMatch[];
+      const rows =
+        (matchesData ?? []) as unknown as JobMatch[];
 
       console.log(
         "Job matches récupérés :",
-        rawMatches
+        rows
       );
 
-      // ==========================================
-      // 4. RÉCUPÉRER LES company_id
-      // ==========================================
-
-      const companyIds = Array.from(
-        new Set(
-          rawMatches
-            .map((match) => {
-              const job = Array.isArray(match.jobs)
-                ? match.jobs[0] ?? null
-                : match.jobs;
-
-              return job?.company_id ?? null;
-            })
-            .filter(
-              (id): id is string =>
-                Boolean(id)
-            )
-        )
-      );
-
-      console.log(
-        "Company IDs trouvés :",
-        companyIds
-      );
-
-      // ==========================================
-      // 5. RÉCUPÉRER COMPANIES SÉPARÉMENT
-      //
-      // Pas de relationship Supabase.
-      // ==========================================
-
-      let companies: Company[] = [];
-
-      if (companyIds.length > 0) {
-        const {
-          data: companiesData,
-          error: companiesError,
-        } = await supabase
-          .from("companies")
-          .select(`
-            id,
-            name,
-            city,
-            country,
-            industry,
-            logo_url,
-            website
-          `)
-          .in("id", companyIds);
-
-        if (companiesError) {
-          console.warn(
-            "Erreur récupération companies :",
-            companiesError
-          );
-
-          // On ne bloque pas l'affichage des offres.
-          companies = [];
-        } else {
-          companies =
-            (companiesData ?? []) as Company[];
-        }
-      }
-
-      console.log(
-        "Companies récupérées :",
-        companies
-      );
-
-      // ==========================================
-      // 6. MAP company_id -> company
-      // ==========================================
-
-      const companyMap =
-        new Map<string, Company>();
-
-      for (const company of companies) {
-        companyMap.set(
-          company.id,
-          company
-        );
-      }
-
-      // ==========================================
-      // 7. CONSTRUIRE LES MATCHES FINAUX
-      // ==========================================
-
-      const finalMatches: JobMatch[] =
-        rawMatches.map((match) => {
-          const rawJob = Array.isArray(
-            match.jobs
-          )
-            ? match.jobs[0] ?? null
-            : match.jobs;
-
-          if (!rawJob) {
-            return {
-              id: match.id,
-              score: match.score,
-              matched_skills:
-                match.matched_skills,
-              missing_skills:
-                match.missing_skills,
-              ai_summary:
-                match.ai_summary,
-              profile_id:
-                match.profile_id,
-              job_id: match.job_id,
-              jobs: null,
-            };
-          }
-
-          const company =
-            rawJob.company_id
-              ? companyMap.get(
-                  rawJob.company_id
-                ) ?? null
-              : null;
-
-          return {
-            id: match.id,
-            score: match.score,
-            matched_skills:
-              match.matched_skills,
-            missing_skills:
-              match.missing_skills,
-            ai_summary:
-              match.ai_summary,
-            profile_id:
-              match.profile_id,
-            job_id: match.job_id,
-
-            jobs: {
-              id: rawJob.id,
-              title: rawJob.title,
-              location:
-                rawJob.location,
-              company_id:
-                rawJob.company_id,
-              company,
-            },
-          };
-        });
-
-      console.log(
-        "Matches finaux :",
-        finalMatches
-      );
-
-      setMatches(finalMatches);
+      setMatches(rows);
     } catch (err: unknown) {
       console.error(
         "Erreur chargement offres :",
@@ -349,7 +187,7 @@ export default function JobsPage() {
   }
 
   // ==========================================
-  // CHARGEMENT INITIAL
+  // Chargement initial
   // ==========================================
 
   useEffect(() => {
@@ -451,7 +289,8 @@ export default function JobsPage() {
           </h2>
 
           <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-400">
-            Aucune correspondance n&apos;a encore été trouvée pour votre profil.
+            Aucune correspondance n&apos;a encore été trouvée
+            pour votre profil.
           </p>
 
           <button

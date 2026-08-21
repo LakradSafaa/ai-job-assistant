@@ -24,7 +24,7 @@ type Job = {
   title: string | null;
   location: string | null;
   company_id: string | null;
-  company: Company | null;
+  companies: Company | null;
 };
 
 type JobMatch = {
@@ -52,37 +52,37 @@ export function JobCard({
     useState(false);
 
   const job = match.jobs;
-  const company = job?.company;
-
-  const score = match.score ?? 0;
 
   const title =
     job?.title || "Offre sans titre";
 
-  const companyName =
-    company?.name ||
+  const company =
+    job?.companies?.name ||
     "Entreprise non spécifiée";
 
   const location =
     job?.location ||
-    (company?.city
-      ? `${company.city}${
-          company.country
-            ? `, ${company.country}`
-            : ""
-        }`
-      : "Lieu non spécifié");
+    [
+      job?.companies?.city,
+      job?.companies?.country,
+    ]
+      .filter(Boolean)
+      .join(", ") ||
+    "Lieu non spécifié";
+
+  const score = Math.round(
+    match.score ?? 0
+  );
 
   // ==========================================
-  // MATCHED SKILLS
+  // COMPÉTENCES
   // ==========================================
 
   const matchedSkills = Array.isArray(
     match.matched_skills
   )
     ? match.matched_skills
-    : typeof match.matched_skills ===
-        "string"
+    : typeof match.matched_skills === "string"
       ? match.matched_skills
           .split(",")
           .map((skill) => skill.trim())
@@ -114,7 +114,7 @@ export function JobCard({
                 <Building2 size={15} />
 
                 <span className="truncate">
-                  {companyName}
+                  {company}
                 </span>
               </div>
 
@@ -145,11 +145,13 @@ export function JobCard({
           <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
 
             <div className="mb-1 flex items-center gap-2 text-xs font-semibold text-emerald-400">
+
               <Sparkles size={14} />
 
               <span>
                 Analyse IA
               </span>
+
             </div>
 
             <p className="line-clamp-3 text-sm leading-5 text-slate-400">
@@ -159,30 +161,36 @@ export function JobCard({
           </div>
         )}
 
-        {/* SKILLS */}
+        {/* MATCHED SKILLS */}
 
         {matchedSkills.length > 0 && (
           <div>
+
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
               Compétences correspondantes
             </p>
 
             <div className="flex flex-wrap gap-2">
+
               {matchedSkills
                 .slice(0, 6)
-                .map((skill, index) => (
-                  <span
-                    key={`${skill}-${index}`}
-                    className="rounded-md bg-slate-800 px-2 py-1 text-xs text-slate-300"
-                  >
-                    {skill}
-                  </span>
-                ))}
+                .map(
+                  (skill, index) => (
+                    <span
+                      key={`${skill}-${index}`}
+                      className="rounded-md bg-slate-800 px-2 py-1 text-xs text-slate-300"
+                    >
+                      {skill}
+                    </span>
+                  )
+                )}
+
             </div>
+
           </div>
         )}
 
-        {/* BUTTON */}
+        {/* APPLY BUTTON */}
 
         <div className="border-t border-slate-800 pt-4">
 
@@ -213,9 +221,9 @@ export function JobCard({
         jobMatchId={String(match.id)}
         jobTitle={title}
         companyName={
-          companyName !==
+          company !==
           "Entreprise non spécifiée"
-            ? companyName
+            ? company
             : undefined
         }
         onSuccess={() =>
