@@ -13,3 +13,12 @@ services:
       - ./n8n_data:/home/node/.n8n
 
     restart: unless-stopped
+
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: gotenberg
+
+    ports:
+      - "3002:3000"
+
+    restart: unless-stopped
