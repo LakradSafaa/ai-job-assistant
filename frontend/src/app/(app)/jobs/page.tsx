@@ -7,7 +7,7 @@ import {
   useState,
 } from "react";
 
-import { createBrowserClient } from "@supabase/ssr";
+import { supabase } from "@/lib/supabase/client";
 
 import {
   Search,
@@ -38,12 +38,16 @@ type Job = {
 
   created_at?: string | null;
 
+  /*
+   * IMPORTANT :
+   * company_id n'est PAS utilisé dans la requête principale
+   * jobs, car ce champ n'est pas confirmé dans la table jobs.
+   *
+   * Il reste optionnel uniquement pour les données retournées
+   * par le matching n8n.
+   */
   company_id?: string | null;
 
-  /**
-   * Nom enrichi depuis la table companies.
-   * Ce champ n'existe pas forcément dans jobs.
-   */
   company?: string | null;
 
   company_name?: string | null;
@@ -76,10 +80,13 @@ type Job = {
 
   url?: string | null;
 
-  /**
+  link?: string | null;
+
+  apply_url?: string | null;
+
+  /*
    * IMPORTANT :
-   * Le vrai champ Supabase est "domaine".
-   * Il n'y a PAS de "domain".
+   * Le vrai champ est domaine.
    */
   domaine?: string | null;
 
@@ -108,18 +115,6 @@ type Job = {
   is_saved?: boolean;
 };
 
-type Company = {
-  id: string;
-
-  name?: string | null;
-
-  company_name?: string | null;
-
-  company?: string | null;
-
-  title?: string | null;
-};
-
 /* ============================================================
    HELPERS
 ============================================================ */
@@ -143,9 +138,9 @@ function parseSkills(
     return [];
   }
 
-  /* ----------------------------------------------------------
-     JSON ARRAY
-  ---------------------------------------------------------- */
+  /*
+   * JSON ARRAY
+   */
 
   try {
     const parsed = JSON.parse(text);
@@ -156,22 +151,18 @@ function parseSkills(
         .filter(Boolean);
     }
   } catch {
-    // Pas du JSON
+    // Ce n'est pas du JSON.
   }
 
-  /* ----------------------------------------------------------
-     TEXT
-  ---------------------------------------------------------- */
+  /*
+   * TEXT
+   */
 
   return text
     .split(/[,;|\n]/)
     .map((item) => item.trim())
     .filter(Boolean);
 }
-
-/* ============================================================
-   SAFE TEXT
-============================================================ */
 
 function safeText(
   value: unknown,
@@ -219,32 +210,18 @@ export default function JobsPage() {
     useState<string | null>(null);
 
   /* ==========================================================
-     SUPABASE
-  ========================================================== */
-
-  const supabase = useMemo(() => {
-    return createBrowserClient(
-      process.env
-        .NEXT_PUBLIC_SUPABASE_URL!,
-      process.env
-        .NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
-  }, []);
-
-  /* ==========================================================
      GET PROFILE ID
   ========================================================== */
 
   const getProfileId =
     useCallback(
       async (): Promise<string> => {
-        /* ------------------------------------------------------
-           1. LOCAL STORAGE
-        ------------------------------------------------------ */
+        /*
+         * 1. LOCAL STORAGE
+         */
 
         if (
-          typeof window !==
-          "undefined"
+          typeof window !== "undefined"
         ) {
           const stored =
             localStorage.getItem(
@@ -259,9 +236,9 @@ export default function JobsPage() {
           }
         }
 
-        /* ------------------------------------------------------
-           2. AUTH USER
-        ------------------------------------------------------ */
+        /*
+         * 2. AUTH USER
+         */
 
         const {
           data: {
@@ -275,8 +252,7 @@ export default function JobsPage() {
             String(user.id);
 
           if (
-            typeof window !==
-            "undefined"
+            typeof window !== "undefined"
           ) {
             localStorage.setItem(
               "profile_id",
@@ -287,9 +263,12 @@ export default function JobsPage() {
           return id;
         }
 
-        /* ------------------------------------------------------
-           3. FIRST PROFILE
-        ------------------------------------------------------ */
+        /*
+         * 3. FIRST PROFILE
+         *
+         * Fallback uniquement si aucun
+         * utilisateur authentifié n'est trouvé.
+         */
 
         const {
           data: profile,
@@ -317,8 +296,7 @@ export default function JobsPage() {
           String(profile.id);
 
         if (
-          typeof window !==
-          "undefined"
+          typeof window !== "undefined"
         ) {
           localStorage.setItem(
             "profile_id",
@@ -328,11 +306,17 @@ export default function JobsPage() {
 
         return id;
       },
-      [supabase]
+      []
     );
 
   /* ==========================================================
-     ENRICH COMPANY NAMES
+     COMPANY NAME
+     
+     IMPORTANT :
+     On NE fait plus de requête automatique vers companies
+     pendant le chargement de /jobs.
+
+     Cela supprime le Bad Request actuel.
   ========================================================== */
 
   const enrichCompanies =
@@ -342,146 +326,33 @@ export default function JobsPage() {
       ): Promise<Job[]> => {
         if (
           !sourceJobs ||
-          sourceJobs.length ===
-            0
+          sourceJobs.length === 0
         ) {
           return [];
         }
 
-        /* ------------------------------------------------------
-           GET UNIQUE COMPANY IDS
-        ------------------------------------------------------ */
-
-        const companyIds =
-          Array.from(
-            new Set(
-              sourceJobs
-                .map(
-                  (job) =>
-                    job.company_id
-                )
-                .filter(Boolean)
-                .map(String)
-            )
-          );
-
-        /* ------------------------------------------------------
-           NO COMPANY IDS
-        ------------------------------------------------------ */
-
-        if (
-          companyIds.length ===
-          0
-        ) {
-          return sourceJobs.map(
-            (job) => ({
-              ...job,
-
-              company:
-                job.company ||
-                job.company_name ||
-                "Entreprise non renseignée",
-            })
-          );
-        }
-
-        /* ------------------------------------------------------
-           GET COMPANIES
-
-           IMPORTANT :
-           select("*") évite les erreurs dues à
-           name/company_name/company si une seule
-           de ces colonnes existe réellement.
-        ------------------------------------------------------ */
-
-        const {
-          data,
-          error,
-        } =
-          await supabase
-            .from("companies")
-            .select("*")
-            .in(
-              "id",
-              companyIds
-            );
-
-        if (error) {
-          console.error(
-            "COMPANIES ERROR:",
-            error,
-            JSON.stringify(
-              error,
-              null,
-              2
-            )
-          );
-
-          /*
-           * IMPORTANT :
-           * Une erreur sur companies ne doit pas
-           * empêcher l'affichage des jobs.
-           */
-
-          return sourceJobs.map(
-            (job) => ({
-              ...job,
-
-              company:
-                job.company ||
-                job.company_name ||
-                "Entreprise non renseignée",
-            })
-          );
-        }
-
-        /* ------------------------------------------------------
-           COMPANY MAP
-        ------------------------------------------------------ */
-
-        const companies =
-          (data || []) as Company[];
-
-        const companyMap =
-          new Map<
-            string,
-            string
-          >();
-
-        for (const company of companies) {
-          const name =
-            company.name ||
-            company.company_name ||
-            company.company ||
-            company.title ||
-            null;
-
-          if (name) {
-            companyMap.set(
-              String(
-                company.id
-              ),
-              name
-            );
-          }
-        }
-
-        /* ------------------------------------------------------
-           MERGE
-        ------------------------------------------------------ */
+        /*
+         * On ne bloque jamais les jobs à cause
+         * de la table companies.
+         *
+         * Si le nom est déjà présent dans les données,
+         * on le conserve.
+         *
+         * Sinon :
+         * "Entreprise non renseignée"
+         */
 
         return sourceJobs.map(
           (job) => {
             const companyName =
-              job.company ||
-              job.company_name ||
-              (job.company_id
-                ? companyMap.get(
-                    String(
-                      job.company_id
-                    )
-                  ) || null
-                : null) ||
+              safeText(
+                job.company,
+                ""
+              ).trim() ||
+              safeText(
+                job.company_name,
+                ""
+              ).trim() ||
               "Entreprise non renseignée";
 
             return {
@@ -496,7 +367,7 @@ export default function JobsPage() {
           }
         );
       },
-      [supabase]
+      []
     );
 
   /* ==========================================================
@@ -531,6 +402,12 @@ export default function JobsPage() {
             )
           );
 
+          /*
+           * Une erreur sur saved_jobs
+           * ne doit pas empêcher l'affichage
+           * des offres.
+           */
+
           return new Set();
         }
 
@@ -543,12 +420,12 @@ export default function JobsPage() {
           )
         );
       },
-      [supabase]
+      []
     );
 
   /* ==========================================================
      LOAD ALL JOBS
-  ========================================================== */
+============================================================ */
 
   const fetchJobs =
     useCallback(
@@ -557,9 +434,9 @@ export default function JobsPage() {
         setErrorMessage(null);
 
         try {
-          /* ----------------------------------------------------
-             PROFILE
-          ---------------------------------------------------- */
+          /*
+           * PROFILE
+           */
 
           const currentProfileId =
             await getProfileId();
@@ -568,12 +445,18 @@ export default function JobsPage() {
             currentProfileId
           );
 
-          /* ----------------------------------------------------
-             GET JOBS
-
-             IMPORTANT :
-             "domaine" et non "domain".
-          ---------------------------------------------------- */
+          /*
+           * GET JOBS
+           *
+           * IMPORTANT :
+           *
+           * On utilise uniquement les colonnes
+           * connues/confirmées de jobs.
+           *
+           * Pas de company_id ici.
+           * Pas de company.
+           * Pas de domain.
+           */
 
           const {
             data,
@@ -584,7 +467,6 @@ export default function JobsPage() {
               .select(`
                 id,
                 created_at,
-                company_id,
                 title,
                 description,
                 location,
@@ -599,6 +481,8 @@ export default function JobsPage() {
                 source,
                 external_id,
                 url,
+                link,
+                apply_url,
                 domaine,
                 sous_domaine,
                 classification_score
@@ -606,8 +490,7 @@ export default function JobsPage() {
               .order(
                 "created_at",
                 {
-                  ascending:
-                    false,
+                  ascending: false,
                 }
               );
 
@@ -636,27 +519,32 @@ export default function JobsPage() {
             loadedJobs.length
           );
 
-          /* ----------------------------------------------------
-             COMPANIES
-          ---------------------------------------------------- */
+          /*
+           * COMPANY ENRICHMENT
+           *
+           * Aucun appel companies.
+           */
 
           loadedJobs =
             await enrichCompanies(
               loadedJobs
             );
 
-          /* ----------------------------------------------------
-             SAVED JOBS
-          ---------------------------------------------------- */
+          /*
+           * SAVED JOBS
+           */
 
           const savedIds =
             await getSavedIds(
               currentProfileId
             );
 
-          /* ----------------------------------------------------
-             NORMALIZE
-          ---------------------------------------------------- */
+          /*
+           * NORMALIZE
+           *
+           * Les offres normales ne sont pas
+           * des matches IA.
+           */
 
           loadedJobs =
             loadedJobs.map(
@@ -720,7 +608,6 @@ export default function JobsPage() {
         enrichCompanies,
         getProfileId,
         getSavedIds,
-        supabase,
       ]
     );
 
@@ -758,6 +645,7 @@ export default function JobsPage() {
             job.domaine,
             job.sous_domaine,
             job.description,
+
             Array.isArray(
               job.skills
             )
@@ -765,6 +653,7 @@ export default function JobsPage() {
                   " "
                 )
               : job.skills,
+
             job.contract_type,
             job.experience_level,
           ]
@@ -783,8 +672,11 @@ export default function JobsPage() {
     ]);
 
   /* ==========================================================
-     MATCHING
-  ========================================================== */
+     MATCHING IA
+     
+     IMPORTANT :
+     Cette logique reste intacte.
+============================================================ */
 
   const handleRunMatching =
     async () => {
@@ -797,9 +689,9 @@ export default function JobsPage() {
       setSuccessMessage(null);
 
       try {
-        /* ------------------------------------------------------
-           PROFILE
-        ------------------------------------------------------ */
+        /*
+         * PROFILE
+         */
 
         const currentProfileId =
           profileId ||
@@ -826,9 +718,9 @@ export default function JobsPage() {
           "================================="
         );
 
-        /* ------------------------------------------------------
-           CALL NEXT.JS API
-        ------------------------------------------------------ */
+        /*
+         * CALL NEXT.JS API
+         */
 
         const response =
           await fetch(
@@ -854,9 +746,9 @@ export default function JobsPage() {
             }
           );
 
-        /* ------------------------------------------------------
-           RESPONSE
-        ------------------------------------------------------ */
+        /*
+         * RESPONSE
+         */
 
         const raw =
           await response.text();
@@ -889,9 +781,9 @@ export default function JobsPage() {
           data
         );
 
-        /* ------------------------------------------------------
-           HTTP ERROR
-        ------------------------------------------------------ */
+        /*
+         * HTTP ERROR
+         */
 
         if (!response.ok) {
           throw new Error(
@@ -913,9 +805,9 @@ export default function JobsPage() {
           );
         }
 
-        /* ------------------------------------------------------
-           EXTRACT MATCHED JOBS
-        ------------------------------------------------------ */
+        /*
+         * EXTRACT MATCHED JOBS
+         */
 
         let rawMatchedJobs: any[] =
           [];
@@ -946,9 +838,9 @@ export default function JobsPage() {
           rawMatchedJobs.length
         );
 
-        /* ------------------------------------------------------
-           NORMALIZATION
-        ------------------------------------------------------ */
+        /*
+         * NORMALIZATION
+         */
 
         const normalizedJobs: Job[] =
           rawMatchedJobs
@@ -985,9 +877,9 @@ export default function JobsPage() {
                     item.job;
                 }
 
-                /* ------------------------------------------------
-                   ID
-                ------------------------------------------------ */
+                /*
+                 * ID
+                 */
 
                 if (
                   !job?.id &&
@@ -1005,9 +897,9 @@ export default function JobsPage() {
                   return null;
                 }
 
-                /* ------------------------------------------------
-                   SCORE
-                ------------------------------------------------ */
+                /*
+                 * SCORE
+                 */
 
                 const score =
                   Number(
@@ -1018,14 +910,15 @@ export default function JobsPage() {
                       0
                   );
 
-                /* ------------------------------------------------
-                   RETURN
-                ------------------------------------------------ */
+                /*
+                 * RETURN
+                 */
 
                 return {
                   ...job,
 
-                  id: job.id,
+                  id:
+                    job.id,
 
                   score,
 
@@ -1059,8 +952,11 @@ export default function JobsPage() {
                     job?.recommendation ??
                     null,
 
-                  /* IMPORTANT :
-                     garder le vrai champ domaine */
+                  /*
+                   * IMPORTANT :
+                   * vrai champ = domaine
+                   */
+
                   domaine:
                     job?.domaine ??
                     null,
@@ -1078,9 +974,9 @@ export default function JobsPage() {
                 job !== null
             );
 
-        /* ------------------------------------------------------
-           SCORE >= 60
-        ------------------------------------------------------ */
+        /*
+         * SCORE >= 60
+         */
 
         const matchingJobs =
           normalizedJobs.filter(
@@ -1092,18 +988,20 @@ export default function JobsPage() {
               ) >= 60
           );
 
-        /* ------------------------------------------------------
-           ENRICH COMPANIES
-        ------------------------------------------------------ */
+        /*
+         * COMPANY
+         *
+         * Aucun appel Supabase companies.
+         */
 
         let finalJobs =
           await enrichCompanies(
             matchingJobs
           );
 
-        /* ------------------------------------------------------
-           SAVED
-        ------------------------------------------------------ */
+        /*
+         * SAVED
+         */
 
         const savedIds =
           await getSavedIds(
@@ -1124,9 +1022,9 @@ export default function JobsPage() {
             })
           );
 
-        /* ------------------------------------------------------
-           SORT SCORE DESC
-        ------------------------------------------------------ */
+        /*
+         * SORT SCORE DESC
+         */
 
         finalJobs.sort(
           (a, b) =>
@@ -1142,17 +1040,17 @@ export default function JobsPage() {
             )
         );
 
-        /* ------------------------------------------------------
-           DISPLAY ONLY MATCHES
-        ------------------------------------------------------ */
+        /*
+         * DISPLAY ONLY MATCHES
+         */
 
         setJobs(
           finalJobs
         );
 
-        /* ------------------------------------------------------
-           TOTAL
-        ------------------------------------------------------ */
+        /*
+         * TOTAL
+         */
 
         const totalReceived =
           Number(
@@ -1167,9 +1065,9 @@ export default function JobsPage() {
               60
           );
 
-        /* ------------------------------------------------------
-           SUCCESS
-        ------------------------------------------------------ */
+        /*
+         * SUCCESS
+         */
 
         setSuccessMessage(
           `Matching terminé : ${finalJobs.length} offre(s) correspondante(s) parmi ${totalReceived} offres. Seuil : ${minimumScore}%.`
@@ -1263,9 +1161,9 @@ export default function JobsPage() {
           currentProfileId
         );
 
-        /* ------------------------------------------------------
-           DELETE
-        ------------------------------------------------------ */
+        /*
+         * DELETE
+         */
 
         if (job.is_saved) {
           const {
@@ -1331,9 +1229,9 @@ export default function JobsPage() {
           return;
         }
 
-        /* ------------------------------------------------------
-           INSERT
-        ------------------------------------------------------ */
+        /*
+         * INSERT
+         */
 
         const {
           error,
@@ -1426,9 +1324,14 @@ export default function JobsPage() {
 
   const handleApply =
     (job: Job) => {
-      if (job.url) {
+      const applicationUrl =
+        job.apply_url ||
+        job.url ||
+        job.link;
+
+      if (applicationUrl) {
         window.open(
-          job.url,
+          applicationUrl,
           "_blank",
           "noopener,noreferrer"
         );
@@ -1542,9 +1445,11 @@ export default function JobsPage() {
 
             <div>
               <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
+
                 <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
 
                 Recherche intelligente
+
               </div>
 
               <h1 className="text-3xl font-bold tracking-tight text-slate-900">
@@ -1570,6 +1475,7 @@ export default function JobsPage() {
                 }
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
+
                 <RefreshCw
                   className={`h-4 w-4 ${
                     isLoading
@@ -1579,6 +1485,7 @@ export default function JobsPage() {
                 />
 
                 Toutes les offres
+
               </button>
 
               <button
@@ -1592,6 +1499,7 @@ export default function JobsPage() {
                 }
                 className="ai-button"
               >
+
                 {isAnalyzing ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -1605,6 +1513,7 @@ export default function JobsPage() {
                     Lancer le matching IA
                   </>
                 )}
+
               </button>
 
             </div>
@@ -1654,6 +1563,7 @@ export default function JobsPage() {
         ==================================================== */}
 
         <div className="saas-card mb-6 p-3 animate-fade-in">
+
           <div className="relative">
 
             <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
@@ -1684,7 +1594,9 @@ export default function JobsPage() {
                 }
                 className="absolute right-4 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
               >
+
                 <X className="h-4 w-4" />
+
               </button>
             )}
 
@@ -1701,6 +1613,7 @@ export default function JobsPage() {
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
 
             <div>
+
               <p className="font-bold">
                 Une erreur est survenue
               </p>
@@ -1708,6 +1621,7 @@ export default function JobsPage() {
               <p className="mt-1 leading-5">
                 {errorMessage}
               </p>
+
             </div>
 
           </div>
@@ -1723,6 +1637,7 @@ export default function JobsPage() {
             <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
 
             <div>
+
               <p className="font-bold">
                 Matching terminé
               </p>
@@ -1730,6 +1645,7 @@ export default function JobsPage() {
               <p className="mt-1">
                 {successMessage}
               </p>
+
             </div>
 
           </div>
@@ -1743,7 +1659,9 @@ export default function JobsPage() {
           <div className="saas-card flex min-h-[360px] flex-col items-center justify-center">
 
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50">
+
               <Loader2 className="h-7 w-7 animate-spin text-emerald-600" />
+
             </div>
 
             <p className="mt-5 text-sm font-semibold text-slate-700">
@@ -1845,25 +1763,31 @@ export default function JobsPage() {
                           <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-500">
 
                             <span className="inline-flex items-center gap-1.5">
+
                               <Building2 className="h-4 w-4 text-slate-400" />
 
                               {job.company ||
                                 job.company_name ||
                                 "Entreprise non spécifiée"}
+
                             </span>
 
                             <span className="inline-flex items-center gap-1.5">
+
                               <MapPin className="h-4 w-4 text-slate-400" />
 
                               {job.location ||
                                 "Localisation non spécifiée"}
+
                             </span>
 
                             {job.contract_type && (
                               <span className="inline-flex items-center gap-1.5">
+
                                 <BriefcaseBusiness className="h-4 w-4 text-slate-400" />
 
                                 {job.contract_type}
+
                               </span>
                             )}
 
@@ -2081,7 +2005,9 @@ export default function JobsPage() {
                           <div className="flex items-center gap-3">
 
                             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100">
+
                               <Sparkles className="h-5 w-5 text-emerald-600" />
+
                             </div>
 
                             <div>
@@ -2138,9 +2064,11 @@ export default function JobsPage() {
                         }
                         className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
                       >
+
                         <Eye className="h-4 w-4" />
 
                         Voir les détails
+
                       </button>
 
                       <button
@@ -2264,7 +2192,9 @@ export default function JobsPage() {
                 }
                 className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
               >
+
                 <X className="h-5 w-5" />
+
               </button>
 
             </div>
@@ -2410,10 +2340,17 @@ export default function JobsPage() {
                       selectedJob
                     )
                   }
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  disabled={
+                    savingJobId ===
+                    selectedJob.id
+                  }
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
                 >
 
-                  {selectedJob.is_saved ? (
+                  {savingJobId ===
+                  selectedJob.id ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : selectedJob.is_saved ? (
                     <BookmarkCheck className="h-4 w-4" />
                   ) : (
                     <Bookmark className="h-4 w-4" />
@@ -2425,7 +2362,9 @@ export default function JobsPage() {
 
                 </button>
 
-                {selectedJob.url && (
+                {(selectedJob.apply_url ||
+                  selectedJob.url ||
+                  selectedJob.link) && (
                   <button
                     type="button"
                     onClick={() =>
@@ -2510,7 +2449,9 @@ function StatCard({
               : "bg-slate-50 text-slate-500",
           ].join(" ")}
         >
+
           <Icon className="h-5 w-5" />
+
         </div>
 
       </div>

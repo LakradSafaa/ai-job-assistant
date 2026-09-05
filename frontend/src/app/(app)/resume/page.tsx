@@ -1,21 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { createBrowserClient } from "@supabase/ssr";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error(
-    "NEXT_PUBLIC_SUPABASE_URL et NEXT_PUBLIC_SUPABASE_ANON_KEY sont obligatoires."
-  );
-}
-
-const supabase = createBrowserClient(
-  supabaseUrl,
-  supabaseAnonKey
-);
+import { supabase } from "@/lib/supabase/client";
 
 /* ============================================================
    TYPES
@@ -24,7 +16,6 @@ const supabase = createBrowserClient(
 type Job = {
   id: string;
   title: string | null;
-  company: string | null;
   domaine: string | null;
   location: string | null;
   source: string | null;
@@ -50,7 +41,10 @@ type ResumeDocument = {
   job: Job | null;
 };
 
-type GenerationAction = "cv" | "letter" | "both";
+type GenerationAction =
+  | "cv"
+  | "letter"
+  | "both";
 
 type GenerationState = {
   jobId: string;
@@ -61,7 +55,9 @@ type GenerationState = {
    HELPERS
 ============================================================ */
 
-function normalizeText(value: unknown): string {
+function normalizeText(
+  value: unknown
+): string {
   return String(value ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -69,62 +65,95 @@ function normalizeText(value: unknown): string {
     .trim();
 }
 
-function formatDate(value: string | null): string {
+function formatDate(
+  value: string | null
+): string {
   if (!value) {
     return "Date inconnue";
   }
 
   try {
-    return new Intl.DateTimeFormat("fr-FR", {
-      day: "2-digit",
-      month: "long",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(value));
+    return new Intl.DateTimeFormat(
+      "fr-FR",
+      {
+        day: "2-digit",
+        month: "long",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }
+    ).format(new Date(value));
   } catch {
     return value;
   }
 }
 
-function getStatusLabel(status: string | null) {
-  const normalized = normalizeText(status);
+function getStatusLabel(
+  status: string | null
+) {
+  const normalized =
+    normalizeText(status);
 
   if (
-    normalized.includes("submitted") ||
-    normalized.includes("accepted")
+    normalized.includes(
+      "submitted"
+    ) ||
+    normalized.includes(
+      "accepted"
+    ) ||
+    normalized.includes(
+      "envoy"
+    )
   ) {
     return {
-      label: status || "Envoyée",
+      label:
+        status || "Envoyée",
       className:
         "bg-emerald-100 text-emerald-700 border-emerald-200",
     };
   }
 
   if (
-    normalized.includes("failed") ||
-    normalized.includes("rejected")
+    normalized.includes(
+      "failed"
+    ) ||
+    normalized.includes(
+      "rejected"
+    ) ||
+    normalized.includes(
+      "refus"
+    )
   ) {
     return {
-      label: status || "Échec",
+      label:
+        status || "Échec",
       className:
         "bg-red-100 text-red-700 border-red-200",
     };
   }
 
   if (
-    normalized.includes("ready") ||
-    normalized.includes("preparing")
+    normalized.includes(
+      "ready"
+    ) ||
+    normalized.includes(
+      "preparing"
+    ) ||
+    normalized.includes(
+      "prepare"
+    )
   ) {
     return {
-      label: status || "Préparation",
+      label:
+        status || "Préparation",
       className:
         "bg-blue-100 text-blue-700 border-blue-200",
     };
   }
 
   return {
-    label: status || "Préparée",
+    label:
+      status || "Préparée",
     className:
       "bg-gray-100 text-gray-700 border-gray-200",
   };
@@ -134,13 +163,18 @@ function downloadTextFile(
   content: string,
   filename: string
 ) {
-  const blob = new Blob([content], {
-    type: "text/plain;charset=utf-8",
-  });
+  const blob = new Blob(
+    [content],
+    {
+      type: "text/plain;charset=utf-8",
+    }
+  );
 
-  const url = URL.createObjectURL(blob);
+  const url =
+    URL.createObjectURL(blob);
 
-  const link = document.createElement("a");
+  const link =
+    document.createElement("a");
 
   link.href = url;
   link.download = filename;
@@ -161,47 +195,60 @@ function openBase64Pdf(
   filename: string
 ) {
   if (!base64) {
-    throw new Error("Document PDF vide.");
+    throw new Error(
+      "Document PDF vide."
+    );
   }
 
-  const cleanBase64 = base64.includes(",")
-    ? base64.split(",")[1]
-    : base64;
+  const cleanBase64 =
+    base64.includes(",")
+      ? base64.split(",")[1]
+      : base64;
 
-  const byteCharacters = window.atob(
-    cleanBase64
-  );
+  const byteCharacters =
+    window.atob(cleanBase64);
 
-  const byteNumbers = new Array(
-    byteCharacters.length
-  );
+  const byteNumbers =
+    new Array(
+      byteCharacters.length
+    );
 
   for (
     let i = 0;
-    i < byteCharacters.length;
+    i <
+    byteCharacters.length;
     i++
   ) {
     byteNumbers[i] =
-      byteCharacters.charCodeAt(i);
+      byteCharacters.charCodeAt(
+        i
+      );
   }
 
-  const byteArray = new Uint8Array(
-    byteNumbers
+  const byteArray =
+    new Uint8Array(
+      byteNumbers
+    );
+
+  const blob = new Blob(
+    [byteArray],
+    {
+      type: "application/pdf",
+    }
   );
 
-  const blob = new Blob([byteArray], {
-    type: "application/pdf",
-  });
-
   const objectUrl =
-    window.URL.createObjectURL(blob);
+    window.URL.createObjectURL(
+      blob
+    );
 
   const link =
     document.createElement("a");
 
   link.href = objectUrl;
   link.target = "_blank";
-  link.rel = "noopener noreferrer";
+  link.rel =
+    "noopener noreferrer";
   link.download = filename;
 
   document.body.appendChild(link);
@@ -211,7 +258,9 @@ function openBase64Pdf(
   link.remove();
 
   setTimeout(() => {
-    window.URL.revokeObjectURL(objectUrl);
+    window.URL.revokeObjectURL(
+      objectUrl
+    );
   }, 10000);
 }
 
@@ -220,347 +269,464 @@ function openBase64Pdf(
 ============================================================ */
 
 export default function ResumePage() {
-  const [documents, setDocuments] = useState<
-    ResumeDocument[]
-  >([]);
+  const [
+    documents,
+    setDocuments,
+  ] = useState<ResumeDocument[]>(
+    []
+  );
 
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobs, setJobs] =
+    useState<Job[]>([]);
 
-  const [profileId, setProfileId] =
-    useState<string | null>(null);
+  const [
+    profileId,
+    setProfileId,
+  ] =
+    useState<string | null>(
+      null
+    );
 
-  const [isLoading, setIsLoading] =
-    useState(true);
+  const [
+    isLoading,
+    setIsLoading,
+  ] = useState(true);
 
-  const [isGenerating, setIsGenerating] =
-    useState<GenerationState>(null);
+  const [
+    isGenerating,
+    setIsGenerating,
+  ] =
+    useState<GenerationState>(
+      null
+    );
 
-  const [errorMessage, setErrorMessage] =
-    useState<string | null>(null);
+  const [
+    errorMessage,
+    setErrorMessage,
+  ] =
+    useState<string | null>(
+      null
+    );
 
-  const [successMessage, setSuccessMessage] =
-    useState<string | null>(null);
+  const [
+    successMessage,
+    setSuccessMessage,
+  ] =
+    useState<string | null>(
+      null
+    );
 
-  const [searchTerm, setSearchTerm] =
-    useState("");
+  const [
+    searchTerm,
+    setSearchTerm,
+  ] = useState("");
 
-  const [activeLetter, setActiveLetter] =
-    useState<ResumeDocument | null>(null);
+  const [
+    activeLetter,
+    setActiveLetter,
+  ] =
+    useState<ResumeDocument | null>(
+      null
+    );
 
   /* ============================================================
      GET PROFILE ID
   ============================================================ */
 
   const getProfileId =
-    useCallback(async (): Promise<string> => {
-      const localProfileId =
-        typeof window !== "undefined"
-          ? window.localStorage.getItem(
-              "profile_id"
-            )
-          : null;
+    useCallback(
+      async (): Promise<string> => {
+        const localProfileId =
+          typeof window !==
+          "undefined"
+            ? window.localStorage.getItem(
+                "profile_id"
+              )
+            : null;
 
-      if (localProfileId?.trim()) {
-        return localProfileId.trim();
-      }
+        if (
+          localProfileId?.trim()
+        ) {
+          return localProfileId.trim();
+        }
 
-      const {
-        data: authData,
-        error: authError,
-      } = await supabase.auth.getUser();
-
-      if (authError) {
-        console.warn(
-          "AUTH USER ERROR:",
-          authError.message
-        );
-      }
-
-      const userId =
-        authData?.user?.id;
-
-      if (userId) {
         const {
-          data: profile,
-          error: profileError,
-        } = await supabase
-          .from("profiles")
-          .select("id")
-          .eq("id", userId)
-          .maybeSingle();
+          data: authData,
+          error: authError,
+        } =
+          await supabase.auth.getUser();
 
-        if (profileError) {
-          throw new Error(
-            profileError.message ||
-              "Impossible de récupérer ton profil."
+        if (authError) {
+          console.warn(
+            "AUTH USER ERROR:",
+            authError.message
           );
         }
 
-        if (profile?.id) {
-          const id = String(profile.id);
+        const userId =
+          authData?.user?.id;
 
-          if (
-            typeof window !== "undefined"
-          ) {
-            window.localStorage.setItem(
-              "profile_id",
-              id
+        if (userId) {
+          const {
+            data: profile,
+            error: profileError,
+          } =
+            await supabase
+              .from("profiles")
+              .select("id")
+              .eq(
+                "id",
+                userId
+              )
+              .maybeSingle();
+
+          if (profileError) {
+            throw new Error(
+              profileError.message ||
+                "Impossible de récupérer ton profil."
             );
           }
 
-          return id;
+          if (profile?.id) {
+            const id =
+              String(
+                profile.id
+              );
+
+            if (
+              typeof window !==
+              "undefined"
+            ) {
+              window.localStorage.setItem(
+                "profile_id",
+                id
+              );
+            }
+
+            return id;
+          }
         }
-      }
 
-      /*
-       * Fallback développement.
-       */
-      const {
-        data,
-        error,
-      } = await supabase
-        .from("profiles")
-        .select("id")
-        .limit(1)
-        .maybeSingle();
+        /*
+         * Fallback développement
+         */
 
-      if (error) {
-        throw new Error(
-          error.message ||
-            "Impossible de récupérer le profil."
-        );
-      }
+        const {
+          data,
+          error,
+        } =
+          await supabase
+            .from("profiles")
+            .select("id")
+            .limit(1)
+            .maybeSingle();
 
-      if (!data?.id) {
-        throw new Error(
-          "Aucun profil trouvé. Crée d'abord ton profil."
-        );
-      }
+        if (error) {
+          throw new Error(
+            error.message ||
+              "Impossible de récupérer le profil."
+          );
+        }
 
-      const id = String(data.id);
+        if (!data?.id) {
+          throw new Error(
+            "Aucun profil trouvé. Crée d'abord ton profil."
+          );
+        }
 
-      if (
-        typeof window !== "undefined"
-      ) {
-        window.localStorage.setItem(
-          "profile_id",
-          id
-        );
-      }
+        const id =
+          String(data.id);
 
-      return id;
-    }, []);
+        if (
+          typeof window !==
+          "undefined"
+        ) {
+          window.localStorage.setItem(
+            "profile_id",
+            id
+          );
+        }
+
+        return id;
+      },
+      []
+    );
 
   /* ============================================================
      LOAD GENERATED DOCUMENTS
-     
+
      IMPORTANT:
-     Cette page ne consulte PAS job_matches.
+     - PAS de job_matches
+     - PAS de jobs.company
+     - PAS de applications.updated_at
   ============================================================ */
 
   const loadDocuments =
-    useCallback(async () => {
-      setIsLoading(true);
-      setErrorMessage(null);
+    useCallback(
+      async () => {
+        setIsLoading(true);
+        setErrorMessage(null);
 
-      try {
-        const currentProfileId =
-          await getProfileId();
+        try {
+          /* ====================================================
+             PROFILE
+          ==================================================== */
 
-        setProfileId(
-          currentProfileId
-        );
+          const currentProfileId =
+            await getProfileId();
 
-        /* ======================================================
-           1. APPLICATIONS
-        ====================================================== */
-
-        const {
-          data: applicationsData,
-          error: applicationsError,
-        } = await supabase
-          .from("applications")
-          .select(`
-            id,
-            profile_id,
-            job_id,
-            status,
-            cv_url,
-            cover_letter,
-            applied_at,
-            created_at
-          `)
-          .eq(
-            "profile_id",
+          setProfileId(
             currentProfileId
-          )
-          .order("created_at", {
-            ascending: false,
-          });
-
-        if (applicationsError) {
-          console.error(
-            "APPLICATIONS ERROR:",
-            applicationsError
           );
 
-          throw new Error(
-            applicationsError.message ||
-              "Impossible de récupérer les documents générés."
-          );
-        }
+          /* ====================================================
+             1. APPLICATIONS
+          ==================================================== */
 
-        const applications =
-          (applicationsData ??
-            []) as Application[];
-
-        /* ======================================================
-           2. JOB IDS
-        ====================================================== */
-
-        const jobIds = [
-          ...new Set(
-            applications
-              .map((application) =>
-                application.job_id
-                  ? String(
-                      application.job_id
-                    )
-                  : ""
-              )
-              .filter(Boolean)
-          ),
-        ];
-
-        let jobsList: Job[] = [];
-
-        if (jobIds.length > 0) {
           const {
-            data: jobsData,
-            error: jobsError,
-          } = await supabase
-            .from("jobs")
-            .select(`
-              id,
-              title,
-              company,
-              domaine,
-              location,
-              source,
-              url,
-              link,
-              apply_url,
-              created_at
-            `)
-            .in("id", jobIds);
+            data:
+              applicationsData,
+            error:
+              applicationsError,
+          } =
+            await supabase
+              .from("applications")
+              .select(`
+                id,
+                profile_id,
+                job_id,
+                status,
+                cv_url,
+                cover_letter,
+                applied_at,
+                created_at
+              `)
+              .eq(
+                "profile_id",
+                currentProfileId
+              )
+              .order(
+                "created_at",
+                {
+                  ascending: false,
+                }
+              );
 
-          if (jobsError) {
+          if (
+            applicationsError
+          ) {
             console.error(
-              "JOBS ERROR:",
-              jobsError
+              "APPLICATIONS ERROR:",
+              applicationsError
             );
 
             throw new Error(
-              jobsError.message ||
-                "Impossible de récupérer les offres."
+              applicationsError.message ||
+                "Impossible de récupérer les documents générés."
             );
           }
 
-          jobsList =
-            (jobsData ?? []) as Job[];
-        }
+          const applications =
+            (applicationsData ??
+              []) as Application[];
 
-        setJobs(jobsList);
+          /* ====================================================
+             2. JOB IDS
+          ==================================================== */
 
-        /* ======================================================
-           3. MAP JOBS
-        ====================================================== */
-
-        const jobsById =
-          new Map<string, Job>();
-
-        for (const job of jobsList) {
-          jobsById.set(
-            String(job.id),
-            {
-              ...job,
-              id: String(job.id),
-            }
-          );
-        }
-
-        /* ======================================================
-           4. ONLY APPLICATIONS WITH DOCUMENTS
-        ====================================================== */
-
-        const generatedDocuments =
-          applications
-            .filter(
-              (application) =>
-                Boolean(
-                  application.cv_url ||
-                    application.cover_letter
+          const jobIds = [
+            ...new Set(
+              applications
+                .map(
+                  (
+                    application
+                  ) =>
+                    application.job_id
+                      ? String(
+                          application.job_id
+                        )
+                      : ""
                 )
-            )
-            .map((application) => ({
-              application,
-              job:
-                application.job_id
-                  ? jobsById.get(
-                      String(
-                        application.job_id
-                      )
-                    ) ?? null
-                  : null,
-            }));
+                .filter(Boolean)
+            ),
+          ];
 
-        setDocuments(
-          generatedDocuments
-        );
+          let jobsList: Job[] =
+            [];
 
-        console.log(
-          "DOCUMENTS GÉNÉRÉS:",
-          generatedDocuments.length
-        );
+          /* ====================================================
+             3. JOBS
 
-        if (
-          generatedDocuments.length === 0
-        ) {
-          setSuccessMessage(
-            "Aucun CV ou lettre de motivation généré pour le moment."
+             IMPORTANT:
+             jobs.company a été SUPPRIMÉ.
+
+             On utilise uniquement les colonnes
+             présentes dans ta table jobs.
+          ==================================================== */
+
+          if (
+            jobIds.length > 0
+          ) {
+            const {
+              data: jobsData,
+              error: jobsError,
+            } =
+              await supabase
+                .from("jobs")
+                .select(`
+                  id,
+                  title,
+                  domaine,
+                  location,
+                  source,
+                  url,
+                  link,
+                  apply_url,
+                  created_at
+                `)
+                .in(
+                  "id",
+                  jobIds
+                );
+
+            if (
+              jobsError
+            ) {
+              console.error(
+                "JOBS ERROR:",
+                jobsError
+              );
+
+              throw new Error(
+                jobsError.message ||
+                  "Impossible de récupérer les offres."
+              );
+            }
+
+            jobsList =
+              (jobsData ??
+                []) as Job[];
+          }
+
+          setJobs(
+            jobsList
           );
-        } else {
-          setSuccessMessage(
-            `${generatedDocuments.length} document${
-              generatedDocuments.length >
-              1
-                ? "s"
-                : ""
-            } généré${
-              generatedDocuments.length >
-              1
-                ? "s"
-                : ""
-            }.`
+
+          /* ====================================================
+             4. MAP JOBS
+          ==================================================== */
+
+          const jobsById =
+            new Map<
+              string,
+              Job
+            >();
+
+          for (const job of jobsList) {
+            jobsById.set(
+              String(
+                job.id
+              ),
+              {
+                ...job,
+                id: String(
+                  job.id
+                ),
+              }
+            );
+          }
+
+          /* ====================================================
+             5. DOCUMENTS UNIQUEMENT
+          ==================================================== */
+
+          const generatedDocuments =
+            applications
+              .filter(
+                (
+                  application
+                ) =>
+                  Boolean(
+                    application.cv_url ||
+                      application.cover_letter
+                  )
+              )
+              .map(
+                (
+                  application
+                ) => ({
+                  application,
+                  job:
+                    application.job_id
+                      ? jobsById.get(
+                          String(
+                            application.job_id
+                          )
+                        ) ??
+                        null
+                      : null,
+                })
+              );
+
+          setDocuments(
+            generatedDocuments
+          );
+
+          console.log(
+            "DOCUMENTS GÉNÉRÉS:",
+            generatedDocuments.length
+          );
+
+          /* ====================================================
+             SUCCESS
+          ==================================================== */
+
+          if (
+            generatedDocuments.length ===
+            0
+          ) {
+            setSuccessMessage(
+              "Aucun CV ou lettre de motivation généré pour le moment."
+            );
+          } else {
+            setSuccessMessage(
+              `${generatedDocuments.length} document${
+                generatedDocuments.length >
+                1
+                  ? "s"
+                  : ""
+              } généré${
+                generatedDocuments.length >
+                1
+                  ? "s"
+                  : ""
+              }.`
+            );
+          }
+        } catch (error) {
+          console.error(
+            "LOAD DOCUMENTS ERROR:",
+            error
+          );
+
+          setDocuments(
+            []
+          );
+
+          setErrorMessage(
+            error instanceof
+            Error
+              ? error.message
+              : "Erreur lors du chargement des documents."
+          );
+        } finally {
+          setIsLoading(
+            false
           );
         }
-      } catch (error) {
-        console.error(
-          "LOAD DOCUMENTS ERROR:",
-          error
-        );
-
-        setDocuments([]);
-
-        setErrorMessage(
-          error instanceof Error
-            ? error.message
-            : "Erreur lors du chargement des documents."
-        );
-      } finally {
-        setIsLoading(false);
-      }
-    }, [getProfileId]);
+      },
+      [getProfileId]
+    );
 
   /* ============================================================
      INITIAL LOAD
@@ -577,17 +743,21 @@ export default function ResumePage() {
   const filteredDocuments =
     useMemo(() => {
       const search =
-        normalizeText(searchTerm);
+        normalizeText(
+          searchTerm
+        );
 
       if (!search) {
         return documents;
       }
 
       return documents.filter(
-        ({ application, job }) => {
+        ({
+          application,
+          job,
+        }) => {
           const values = [
             job?.title,
-            job?.company,
             job?.domaine,
             job?.location,
             job?.source,
@@ -595,10 +765,11 @@ export default function ResumePage() {
             application.cover_letter,
           ];
 
-          return values.some((value) =>
-            normalizeText(
-              value
-            ).includes(search)
+          return values.some(
+            (value) =>
+              normalizeText(
+                value
+              ).includes(search)
           );
         }
       );
@@ -618,7 +789,9 @@ export default function ResumePage() {
 
       const cvs =
         documents.filter(
-          ({ application }) =>
+          ({
+            application,
+          }) =>
             Boolean(
               application.cv_url
             )
@@ -626,7 +799,9 @@ export default function ResumePage() {
 
       const letters =
         documents.filter(
-          ({ application }) =>
+          ({
+            application,
+          }) =>
             Boolean(
               application.cover_letter
             )
@@ -634,7 +809,9 @@ export default function ResumePage() {
 
       const both =
         documents.filter(
-          ({ application }) =>
+          ({
+            application,
+          }) =>
             Boolean(
               application.cv_url &&
                 application.cover_letter
@@ -666,7 +843,9 @@ export default function ResumePage() {
         return;
       }
 
-      if (isGenerating !== null) {
+      if (
+        isGenerating !== null
+      ) {
         return;
       }
 
@@ -688,37 +867,48 @@ export default function ResumePage() {
               headers: {
                 "Content-Type":
                   "application/json",
+
+                Accept:
+                  "application/json",
               },
 
               body: JSON.stringify({
                 profile_id:
                   profileId,
-                job_id: jobId,
+
+                job_id:
+                  jobId,
+
                 action,
               }),
 
-              cache: "no-store",
+              cache:
+                "no-store",
             }
           );
 
         const responseText =
           await response.text();
 
-        let data: any = {};
+        let data: any =
+          {};
 
         try {
-          data = responseText
-            ? JSON.parse(
-                responseText
-              )
-            : {};
+          data =
+            responseText
+              ? JSON.parse(
+                  responseText
+                )
+              : {};
         } catch {
           data = {
             raw: responseText,
           };
         }
 
-        if (!response.ok) {
+        if (
+          !response.ok
+        ) {
           throw new Error(
             data?.error ||
               data?.message ||
@@ -727,7 +917,8 @@ export default function ResumePage() {
         }
 
         if (
-          data?.success === false
+          data?.success ===
+          false
         ) {
           throw new Error(
             data?.error ||
@@ -736,12 +927,16 @@ export default function ResumePage() {
           );
         }
 
-        /* ======================================================
+        /* ====================================================
            CV
-        ====================================================== */
+        ==================================================== */
 
-        if (action === "cv") {
-          if (data?.cv_base64) {
+        if (
+          action === "cv"
+        ) {
+          if (
+            data?.cv_base64
+          ) {
             openBase64Pdf(
               data.cv_base64,
               "CV-personnalise.pdf"
@@ -761,9 +956,9 @@ export default function ResumePage() {
           }
         }
 
-        /* ======================================================
+        /* ====================================================
            LETTER
-        ====================================================== */
+        ==================================================== */
 
         if (
           action === "letter"
@@ -815,14 +1010,15 @@ export default function ResumePage() {
           }
         }
 
-        /* ======================================================
+        /* ====================================================
            BOTH
-        ====================================================== */
+        ==================================================== */
 
         if (
           action === "both"
         ) {
-          let opened = false;
+          let opened =
+            false;
 
           if (
             data?.cv_base64
@@ -832,7 +1028,8 @@ export default function ResumePage() {
               "CV-personnalise.pdf"
             );
 
-            opened = true;
+            opened =
+              true;
           } else if (
             data?.cv_url
           ) {
@@ -842,7 +1039,8 @@ export default function ResumePage() {
               "noopener,noreferrer"
             );
 
-            opened = true;
+            opened =
+              true;
           }
 
           if (
@@ -867,7 +1065,8 @@ export default function ResumePage() {
               700
             );
 
-            opened = true;
+            opened =
+              true;
           } else if (
             data?.cover_letter_url
           ) {
@@ -882,7 +1081,8 @@ export default function ResumePage() {
               700
             );
 
-            opened = true;
+            opened =
+              true;
           } else if (
             data?.cover_letter
           ) {
@@ -914,7 +1114,8 @@ export default function ResumePage() {
               700
             );
 
-            opened = true;
+            opened =
+              true;
           }
 
           if (!opened) {
@@ -937,13 +1138,16 @@ export default function ResumePage() {
         );
 
         /*
-         * Recharge les applications afin
-         * d'afficher immédiatement le document
-         * enregistré par n8n.
+         * Recharge les documents
+         * enregistrés par n8n.
          */
-        setTimeout(() => {
-          void loadDocuments();
-        }, 1000);
+
+        setTimeout(
+          () => {
+            void loadDocuments();
+          },
+          1000
+        );
       } catch (error) {
         console.error(
           "GENERATION ERROR:",
@@ -951,12 +1155,15 @@ export default function ResumePage() {
         );
 
         setErrorMessage(
-          error instanceof Error
+          error instanceof
+          Error
             ? error.message
             : "Erreur pendant la génération."
         );
       } finally {
-        setIsGenerating(null);
+        setIsGenerating(
+          null
+        );
       }
     };
 
@@ -968,9 +1175,7 @@ export default function ResumePage() {
     <div className="min-h-screen bg-gray-50 p-4 sm:p-6">
       <div className="mx-auto max-w-7xl">
 
-        {/* ======================================================
-            HEADER
-        ====================================================== */}
+        {/* HEADER */}
 
         <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
 
@@ -982,6 +1187,7 @@ export default function ResumePage() {
               </div>
 
               <div>
+
                 <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">
                   Mes CV & lettres
                 </h1>
@@ -990,6 +1196,7 @@ export default function ResumePage() {
                   Retrouve ici tous tes documents
                   générés pour tes candidatures.
                 </p>
+
               </div>
 
             </div>
@@ -1000,7 +1207,9 @@ export default function ResumePage() {
             onClick={() => {
               void loadDocuments();
             }}
-            disabled={isLoading}
+            disabled={
+              isLoading
+            }
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-green-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <span className="text-base">
@@ -1014,9 +1223,7 @@ export default function ResumePage() {
 
         </div>
 
-        {/* ======================================================
-            SUCCESS
-        ====================================================== */}
+        {/* SUCCESS */}
 
         {successMessage && (
           <div className="mb-5 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
@@ -1026,6 +1233,7 @@ export default function ResumePage() {
             </span>
 
             <div>
+
               <div className="font-semibold">
                 Succès
               </div>
@@ -1033,14 +1241,13 @@ export default function ResumePage() {
               <div className="mt-1">
                 {successMessage}
               </div>
+
             </div>
 
           </div>
         )}
 
-        {/* ======================================================
-            ERROR
-        ====================================================== */}
+        {/* ERROR */}
 
         {errorMessage && (
           <div className="mb-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -1078,14 +1285,13 @@ export default function ResumePage() {
           </div>
         )}
 
-        {/* ======================================================
-            STATISTICS
-        ====================================================== */}
+        {/* STATISTICS */}
 
         {!isLoading && (
           <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
 
             <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+
               <div className="text-sm text-gray-500">
                 Documents
               </div>
@@ -1093,9 +1299,11 @@ export default function ResumePage() {
               <div className="mt-2 text-3xl font-bold text-gray-900">
                 {statistics.total}
               </div>
+
             </div>
 
             <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+
               <div className="text-sm text-gray-500">
                 CV générés
               </div>
@@ -1103,9 +1311,11 @@ export default function ResumePage() {
               <div className="mt-2 text-3xl font-bold text-green-600">
                 {statistics.cvs}
               </div>
+
             </div>
 
             <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+
               <div className="text-sm text-gray-500">
                 Lettres
               </div>
@@ -1113,9 +1323,11 @@ export default function ResumePage() {
               <div className="mt-2 text-3xl font-bold text-blue-600">
                 {statistics.letters}
               </div>
+
             </div>
 
             <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+
               <div className="text-sm text-gray-500">
                 CV + lettre
               </div>
@@ -1123,14 +1335,13 @@ export default function ResumePage() {
               <div className="mt-2 text-3xl font-bold text-emerald-600">
                 {statistics.both}
               </div>
+
             </div>
 
           </div>
         )}
 
-        {/* ======================================================
-            GENERATE NEW DOCUMENT
-        ====================================================== */}
+        {/* GENERATE */}
 
         {!isLoading &&
           jobs.length > 0 && (
@@ -1145,6 +1356,7 @@ export default function ResumePage() {
                   </div>
 
                   <div>
+
                     <h2 className="font-bold text-gray-900">
                       Générer un nouveau document
                     </h2>
@@ -1153,6 +1365,7 @@ export default function ResumePage() {
                       Choisis une offre pour créer un CV
                       personnalisé ou une lettre.
                     </p>
+
                   </div>
 
                 </div>
@@ -1161,151 +1374,158 @@ export default function ResumePage() {
 
               <div className="grid gap-4 lg:grid-cols-2">
 
-                {jobs.slice(0, 10).map(
-                  (job) => {
-                    const generating =
-                      isGenerating?.jobId ===
-                      String(job.id);
+                {jobs
+                  .slice(0, 10)
+                  .map(
+                    (job) => {
+                      const generating =
+                        isGenerating?.jobId ===
+                        String(
+                          job.id
+                        );
 
-                    return (
-                      <div
-                        key={String(job.id)}
-                        className="rounded-xl border border-gray-200 p-4 transition hover:border-green-300 hover:shadow-sm"
-                      >
+                      return (
+                        <div
+                          key={String(
+                            job.id
+                          )}
+                          className="rounded-xl border border-gray-200 p-4 transition hover:border-green-300 hover:shadow-sm"
+                        >
 
-                        <div className="min-w-0">
+                          <div>
 
-                          <h3 className="font-semibold text-gray-900">
-                            {job.title ||
-                              "Poste non spécifié"}
-                          </h3>
+                            <h3 className="font-semibold text-gray-900">
+                              {job.title ||
+                                "Poste non spécifié"}
+                            </h3>
 
-                          <div className="mt-1 text-sm text-gray-500">
-                            {job.company ||
-                              "Entreprise non spécifiée"}
+                            <div className="mt-1 text-sm text-gray-500">
+                              {job.domaine ||
+                                "Domaine non spécifié"}
+                            </div>
+
+                            {job.location && (
+                              <div className="mt-1 text-xs text-gray-400">
+                                📍{" "}
+                                {
+                                  job.location
+                                }
+                              </div>
+                            )}
+
                           </div>
 
-                          {job.location && (
-                            <div className="mt-1 text-xs text-gray-400">
-                              📍 {job.location}
-                            </div>
-                          )}
+                          <div className="mt-4 flex flex-wrap gap-2">
+
+                            <button
+                              type="button"
+                              disabled={
+                                isGenerating !==
+                                null
+                              }
+                              onClick={() =>
+                                void handleGenerate(
+                                  String(
+                                    job.id
+                                  ),
+                                  "cv"
+                                )
+                              }
+                              className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {generating &&
+                              isGenerating?.action ===
+                                "cv" ? (
+                                <>
+                                  <span className="animate-spin">
+                                    ⟳
+                                  </span>
+                                  Génération...
+                                </>
+                              ) : (
+                                <>
+                                  📄 CV
+                                </>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={
+                                isGenerating !==
+                                null
+                              }
+                              onClick={() =>
+                                void handleGenerate(
+                                  String(
+                                    job.id
+                                  ),
+                                  "letter"
+                                )
+                              }
+                              className="inline-flex items-center gap-2 rounded-lg border border-green-600 bg-white px-3 py-2 text-xs font-semibold text-green-700 transition hover:bg-green-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {generating &&
+                              isGenerating?.action ===
+                                "letter" ? (
+                                <>
+                                  <span className="animate-spin">
+                                    ⟳
+                                  </span>
+                                  Génération...
+                                </>
+                              ) : (
+                                <>
+                                  ✉️ Lettre
+                                </>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={
+                                isGenerating !==
+                                null
+                              }
+                              onClick={() =>
+                                void handleGenerate(
+                                  String(
+                                    job.id
+                                  ),
+                                  "both"
+                                )
+                              }
+                              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {generating &&
+                              isGenerating?.action ===
+                                "both" ? (
+                                <>
+                                  <span className="animate-spin">
+                                    ⟳
+                                  </span>
+                                  Génération...
+                                </>
+                              ) : (
+                                <>
+                                  📄✉️ Les deux
+                                </>
+                              )}
+                            </button>
+
+                          </div>
 
                         </div>
-
-                        <div className="mt-4 flex flex-wrap gap-2">
-
-                          <button
-                            type="button"
-                            disabled={
-                              isGenerating !==
-                              null
-                            }
-                            onClick={() =>
-                              void handleGenerate(
-                                String(
-                                  job.id
-                                ),
-                                "cv"
-                              )
-                            }
-                            className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {generating &&
-                            isGenerating?.action ===
-                              "cv" ? (
-                              <>
-                                <span className="animate-spin">
-                                  ⟳
-                                </span>
-                                Génération...
-                              </>
-                            ) : (
-                              <>
-                                📄 CV
-                              </>
-                            )}
-                          </button>
-
-                          <button
-                            type="button"
-                            disabled={
-                              isGenerating !==
-                              null
-                            }
-                            onClick={() =>
-                              void handleGenerate(
-                                String(
-                                  job.id
-                                ),
-                                "letter"
-                              )
-                            }
-                            className="inline-flex items-center gap-2 rounded-lg border border-green-600 bg-white px-3 py-2 text-xs font-semibold text-green-700 transition hover:bg-green-50 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {generating &&
-                            isGenerating?.action ===
-                              "letter" ? (
-                              <>
-                                <span className="animate-spin">
-                                  ⟳
-                                </span>
-                                Génération...
-                              </>
-                            ) : (
-                              <>
-                                ✉️ Lettre
-                              </>
-                            )}
-                          </button>
-
-                          <button
-                            type="button"
-                            disabled={
-                              isGenerating !==
-                              null
-                            }
-                            onClick={() =>
-                              void handleGenerate(
-                                String(
-                                  job.id
-                                ),
-                                "both"
-                              )
-                            }
-                            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {generating &&
-                            isGenerating?.action ===
-                              "both" ? (
-                              <>
-                                <span className="animate-spin">
-                                  ⟳
-                                </span>
-                                Génération...
-                              </>
-                            ) : (
-                              <>
-                                📄✉️ Les deux
-                              </>
-                            )}
-                          </button>
-
-                        </div>
-
-                      </div>
-                    );
-                  }
-                )}
+                      );
+                    }
+                  )}
 
               </div>
 
             </section>
           )}
 
-        {/* ======================================================
-            SEARCH
-        ====================================================== */}
+        {/* SEARCH */}
 
         {!isLoading &&
           documents.length > 0 && (
@@ -1319,13 +1539,17 @@ export default function ResumePage() {
 
                 <input
                   type="text"
-                  value={searchTerm}
-                  onChange={(event) =>
+                  value={
+                    searchTerm
+                  }
+                  onChange={(
+                    event
+                  ) =>
                     setSearchTerm(
                       event.target.value
                     )
                   }
-                  placeholder="Rechercher un poste, une entreprise, un domaine..."
+                  placeholder="Rechercher un poste, un domaine ou une localisation..."
                   className="w-full rounded-xl border border-gray-200 bg-white py-3 pl-11 pr-4 text-sm text-gray-800 shadow-sm outline-none transition placeholder:text-gray-400 focus:border-green-500 focus:ring-2 focus:ring-green-500/20"
                 />
 
@@ -1334,9 +1558,7 @@ export default function ResumePage() {
             </div>
           )}
 
-        {/* ======================================================
-            LOADING
-        ====================================================== */}
+        {/* LOADING */}
 
         {isLoading && (
           <div className="rounded-2xl border border-gray-200 bg-white py-20 text-center shadow-sm">
@@ -1356,12 +1578,11 @@ export default function ResumePage() {
           </div>
         )}
 
-        {/* ======================================================
-            EMPTY
-        ====================================================== */}
+        {/* EMPTY */}
 
         {!isLoading &&
-          filteredDocuments.length === 0 && (
+          filteredDocuments.length ===
+            0 && (
             <div className="rounded-2xl border border-dashed border-gray-300 bg-white py-20 text-center shadow-sm">
 
               <div className="text-5xl">
@@ -1369,30 +1590,38 @@ export default function ResumePage() {
               </div>
 
               <h2 className="mt-4 text-lg font-semibold text-gray-900">
-                {documents.length === 0
+                {documents.length ===
+                0
                   ? "Aucun document généré"
                   : "Aucun document trouvé"}
               </h2>
 
               <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-gray-500">
-                {documents.length === 0
+                {documents.length ===
+                0
                   ? "Génère ton premier CV ou ta première lettre de motivation depuis une offre d'emploi."
                   : "Aucun document ne correspond à ta recherche."}
               </p>
 
-              {documents.length === 0 &&
-                jobs.length === 0 && (
+              {documents.length ===
+                0 &&
+                jobs.length ===
+                  0 && (
                   <p className="mx-auto mt-4 max-w-lg rounded-xl bg-amber-50 p-4 text-xs text-amber-700">
-                    Aucune offre disponible pour le
-                    moment. Va dans la page Offres d'emploi
-                    pour vérifier les offres récupérées.
+                    Aucune offre disponible
+                    pour le moment. Vérifie
+                    d'abord les offres dans
+                    la page Offres d'emploi.
                   </p>
                 )}
 
               <button
                 type="button"
                 onClick={() => {
-                  setSearchTerm("");
+                  setSearchTerm(
+                    ""
+                  );
+
                   void loadDocuments();
                 }}
                 className="mt-5 rounded-xl bg-green-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-green-700"
@@ -1403,20 +1632,23 @@ export default function ResumePage() {
             </div>
           )}
 
-        {/* ======================================================
-            DOCUMENT LIST
-        ====================================================== */}
+        {/* DOCUMENT LIST */}
 
         {!isLoading &&
-          filteredDocuments.length > 0 && (
+          filteredDocuments.length >
+            0 && (
             <div className="space-y-5">
 
               <div className="flex items-center justify-between">
 
                 <div className="text-sm text-gray-500">
+
                   <span className="font-semibold text-gray-900">
-                    {filteredDocuments.length}
+                    {
+                      filteredDocuments.length
+                    }
                   </span>{" "}
+
                   document
                   {filteredDocuments.length >
                   1
@@ -1427,6 +1659,7 @@ export default function ResumePage() {
                   1
                     ? "s"
                     : ""}
+
                 </div>
 
                 <div className="text-xs text-gray-400">
@@ -1463,8 +1696,6 @@ export default function ResumePage() {
                       className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:border-green-200 hover:shadow-md"
                     >
 
-                      {/* HEADER */}
-
                       <div className="p-6">
 
                         <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
@@ -1480,7 +1711,9 @@ export default function ResumePage() {
                               <span
                                 className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusInfo.className}`}
                               >
-                                {statusInfo.label}
+                                {
+                                  statusInfo.label
+                                }
                               </span>
 
                             </div>
@@ -1492,23 +1725,30 @@ export default function ResumePage() {
 
                             <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2 text-sm text-gray-500">
 
-                              <span>
-                                🏢{" "}
-                                {job?.company ||
-                                  "Entreprise non spécifiée"}
-                              </span>
+                              {job?.domaine && (
+                                <span>
+                                  💼{" "}
+                                  {
+                                    job.domaine
+                                  }
+                                </span>
+                              )}
 
                               {job?.location && (
                                 <span>
                                   📍{" "}
-                                  {job.location}
+                                  {
+                                    job.location
+                                  }
                                 </span>
                               )}
 
-                              {job?.domaine && (
+                              {job?.source && (
                                 <span>
-                                  💼{" "}
-                                  {job.domaine}
+                                  🌐{" "}
+                                  {
+                                    job.source
+                                  }
                                 </span>
                               )}
 
@@ -1523,12 +1763,13 @@ export default function ResumePage() {
 
                           </div>
 
-                          {/* DOCUMENT COUNTER */}
+                          {/* COUNTERS */}
 
                           <div className="flex shrink-0 gap-2">
 
                             {hasCv && (
                               <div className="rounded-xl bg-green-50 px-4 py-3 text-center">
+
                                 <div className="text-xl">
                                   📄
                                 </div>
@@ -1536,11 +1777,13 @@ export default function ResumePage() {
                                 <div className="mt-1 text-xs font-semibold text-green-700">
                                   CV
                                 </div>
+
                               </div>
                             )}
 
                             {hasLetter && (
                               <div className="rounded-xl bg-blue-50 px-4 py-3 text-center">
+
                                 <div className="text-xl">
                                   ✉️
                                 </div>
@@ -1548,6 +1791,7 @@ export default function ResumePage() {
                                 <div className="mt-1 text-xs font-semibold text-blue-700">
                                   Lettre
                                 </div>
+
                               </div>
                             )}
 
@@ -1708,7 +1952,7 @@ export default function ResumePage() {
                             )}
                           </div>
 
-                          <div className="flex flex-wrap gap-2">
+                          <div>
 
                             {(job?.apply_url ||
                               job?.url ||
@@ -1752,7 +1996,9 @@ export default function ResumePage() {
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           onClick={() =>
-            setActiveLetter(null)
+            setActiveLetter(
+              null
+            )
           }
         >
 
@@ -1763,7 +2009,7 @@ export default function ResumePage() {
             }
           >
 
-            {/* MODAL HEADER */}
+            {/* HEADER */}
 
             <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
 
@@ -1787,8 +2033,8 @@ export default function ResumePage() {
                     "Candidature"}{" "}
                   —{" "}
                   {activeLetter.job
-                    ?.company ||
-                    "Entreprise"}
+                    ?.domaine ||
+                    "Domaine"}
                 </p>
 
               </div>
@@ -1796,7 +2042,9 @@ export default function ResumePage() {
               <button
                 type="button"
                 onClick={() =>
-                  setActiveLetter(null)
+                  setActiveLetter(
+                    null
+                  )
                 }
                 className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-900"
               >
@@ -1805,7 +2053,7 @@ export default function ResumePage() {
 
             </div>
 
-            {/* LETTER CONTENT */}
+            {/* CONTENT */}
 
             <div className="overflow-y-auto p-6">
 
@@ -1819,7 +2067,7 @@ export default function ResumePage() {
 
             </div>
 
-            {/* MODAL FOOTER */}
+            {/* FOOTER */}
 
             <div className="flex flex-wrap justify-end gap-3 border-t border-gray-200 px-6 py-4">
 
@@ -1831,7 +2079,7 @@ export default function ResumePage() {
                       .application
                       .cover_letter ||
                       "",
-                    `Lettre-de-motivation.txt`
+                    "Lettre-de-motivation.txt"
                   )
                 }
                 className="inline-flex items-center gap-2 rounded-xl border border-blue-600 bg-white px-4 py-2.5 text-sm font-semibold text-blue-700 transition hover:bg-blue-50"
@@ -1842,7 +2090,9 @@ export default function ResumePage() {
               <button
                 type="button"
                 onClick={() =>
-                  setActiveLetter(null)
+                  setActiveLetter(
+                    null
+                  )
                 }
                 className="rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800"
               >
