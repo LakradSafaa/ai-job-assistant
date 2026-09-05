@@ -1,347 +1,2615 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import {
-  Briefcase,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
+import { createBrowserClient } from "@supabase/ssr";
+
+import {
+  Search,
+  Eye,
+  Bookmark,
+  BookmarkCheck,
+  ExternalLink,
+  MapPin,
+  Building2,
+  BriefcaseBusiness,
+  Sparkles,
+  CheckCircle2,
+  AlertCircle,
   Loader2,
+  X,
   RefreshCw,
+  BrainCircuit,
+  Target,
+  type LucideIcon,
 } from "lucide-react";
 
-import { createClient } from "@/lib/supabase/client";
-import JobCard from "@/components/jobs/JobCard";
+/* ============================================================
+   TYPES
+============================================================ */
+
+type Job = {
+  id: string | number;
+
+  created_at?: string | null;
+
+  company_id?: string | null;
+
+  /**
+   * Nom enrichi depuis la table companies.
+   * Ce champ n'existe pas forcément dans jobs.
+   */
+  company?: string | null;
+
+  company_name?: string | null;
+
+  title?: string | null;
+
+  description?: string | null;
+
+  location?: string | null;
+
+  contract_type?: string | null;
+
+  remote?: boolean | null;
+
+  salary_min?: number | null;
+
+  salary_max?: number | null;
+
+  currency?: string | null;
+
+  experience_level?: string | null;
+
+  skills?: string | string[] | null;
+
+  published_at?: string | null;
+
+  source?: string | null;
+
+  external_id?: string | null;
+
+  url?: string | null;
+
+  /**
+   * IMPORTANT :
+   * Le vrai champ Supabase est "domaine".
+   * Il n'y a PAS de "domain".
+   */
+  domaine?: string | null;
+
+  sous_domaine?: string | null;
+
+  classification_score?: number | null;
+
+  /* ==========================================================
+     MATCHING
+  ========================================================== */
+
+  score?: number | null;
+
+  match_score?: number | null;
+
+  matched_skills?: string | string[] | null;
+
+  missing_skills?: string | string[] | null;
+
+  ai_summary?: string | null;
+
+  ai_analysis?: string | null;
+
+  recommendation?: string | null;
+
+  is_saved?: boolean;
+};
 
 type Company = {
   id: string;
-  name: string | null;
-  city: string | null;
-  country: string | null;
-  industry: string | null;
-  logo_url: string | null;
-  website: string | null;
+
+  name?: string | null;
+
+  company_name?: string | null;
+
+  company?: string | null;
+
+  title?: string | null;
 };
 
-type Job = {
-  id: string;
-  title: string | null;
-  location: string | null;
-  company_id: string | null;
-  companies: Company | null;
-};
+/* ============================================================
+   HELPERS
+============================================================ */
 
-export type JobMatch = {
-  id: number;
-  score: number | null;
-  matched_skills: string[] | string | null;
-  missing_skills: string[] | string | null;
-  ai_summary: string | null;
-  profile_id: string | null;
-  job_id: string | null;
-  jobs: Job | null;
-};
+function parseSkills(
+  value: string | string[] | null | undefined
+): string[] {
+  if (!value) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item).trim())
+      .filter(Boolean);
+  }
+
+  const text = String(value).trim();
+
+  if (!text) {
+    return [];
+  }
+
+  /* ----------------------------------------------------------
+     JSON ARRAY
+  ---------------------------------------------------------- */
+
+  try {
+    const parsed = JSON.parse(text);
+
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((item) => String(item).trim())
+        .filter(Boolean);
+    }
+  } catch {
+    // Pas du JSON
+  }
+
+  /* ----------------------------------------------------------
+     TEXT
+  ---------------------------------------------------------- */
+
+  return text
+    .split(/[,;|\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+/* ============================================================
+   SAFE TEXT
+============================================================ */
+
+function safeText(
+  value: unknown,
+  fallback = ""
+): string {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  return String(value);
+}
+
+/* ============================================================
+   PAGE
+============================================================ */
 
 export default function JobsPage() {
-  const [matches, setMatches] = useState<JobMatch[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [jobs, setJobs] = useState<Job[]>([]);
 
-  async function loadJobs() {
-    try {
-      setLoading(true);
-      setError("");
+  const [isLoading, setIsLoading] =
+    useState(true);
 
-      const supabase = createClient();
+  const [isAnalyzing, setIsAnalyzing] =
+    useState(false);
 
-      // ==========================================
-      // 1. Vérifier l'utilisateur connecté
-      // ==========================================
+  const [errorMessage, setErrorMessage] =
+    useState<string | null>(null);
 
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser();
+  const [successMessage, setSuccessMessage] =
+    useState<string | null>(null);
 
-      if (authError) {
-        console.error(
-          "Erreur authentification :",
-          authError
-        );
+  const [searchTerm, setSearchTerm] =
+    useState("");
 
-        throw new Error(
-          "Impossible de vérifier votre session."
-        );
-      }
+  const [savingJobId, setSavingJobId] =
+    useState<string | number | null>(null);
 
-      if (!user) {
-        throw new Error(
-          "Utilisateur non authentifié. Veuillez vous reconnecter."
-        );
-      }
+  const [selectedJob, setSelectedJob] =
+    useState<Job | null>(null);
 
-      console.log(
-        "Utilisateur connecté :",
-        user.id
-      );
+  const [profileId, setProfileId] =
+    useState<string | null>(null);
 
-      // ==========================================
-      // 2. Vérifier le profil
-      // ==========================================
+  /* ==========================================================
+     SUPABASE
+  ========================================================== */
 
-      const {
-        data: profile,
-        error: profileError,
-      } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      if (profileError) {
-        console.warn(
-          "Erreur récupération profile :",
-          profileError
-        );
-      }
-
-      const profileId =
-        profile?.id ?? user.id;
-
-      console.log(
-        "Profile utilisé :",
-        profileId
-      );
-
-      // ==========================================
-      // 3. Récupérer les job_matches
-      // ==========================================
-
-      const {
-        data: matchesData,
-        error: matchesError,
-      } = await supabase
-        .from("job_matches")
-        .select(`
-          id,
-          score,
-          matched_skills,
-          missing_skills,
-          ai_summary,
-          profile_id,
-          job_id,
-          jobs (
-            id,
-            title,
-            location,
-            company_id,
-            companies (
-              id,
-              name,
-              city,
-              country,
-              industry,
-              logo_url,
-              website
-            )
-          )
-        `)
-        .eq("profile_id", profileId)
-        .order("score", {
-          ascending: false,
-        });
-
-      if (matchesError) {
-        console.error(
-          "Erreur job_matches :",
-          matchesError
-        );
-
-        throw new Error(
-          `Erreur job_matches : ${matchesError.message}`
-        );
-      }
-
-      const rows =
-        (matchesData ?? []) as unknown as JobMatch[];
-
-      console.log(
-        "Job matches récupérés :",
-        rows
-      );
-
-      setMatches(rows);
-    } catch (err: unknown) {
-      console.error(
-        "Erreur chargement offres :",
-        err
-      );
-
-      setMatches([]);
-
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Une erreur est survenue."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // ==========================================
-  // Chargement initial
-  // ==========================================
-
-  useEffect(() => {
-    loadJobs();
+  const supabase = useMemo(() => {
+    return createBrowserClient(
+      process.env
+        .NEXT_PUBLIC_SUPABASE_URL!,
+      process.env
+        .NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
   }, []);
 
-  // ==========================================
-  // LOADING
-  // ==========================================
+  /* ==========================================================
+     GET PROFILE ID
+  ========================================================== */
 
-  if (loading) {
-    return (
-      <div className="space-y-8">
-        <div>
-          <h1 className="text-2xl font-bold text-white">
-            Offres recommandées
-          </h1>
+  const getProfileId =
+    useCallback(
+      async (): Promise<string> => {
+        /* ------------------------------------------------------
+           1. LOCAL STORAGE
+        ------------------------------------------------------ */
 
-          <p className="mt-2 text-sm text-slate-400">
-            Les offres correspondant à votre profil.
-          </p>
-        </div>
+        if (
+          typeof window !==
+          "undefined"
+        ) {
+          const stored =
+            localStorage.getItem(
+              "profile_id"
+            );
 
-        <div className="flex min-h-[300px] items-center justify-center rounded-2xl border border-slate-800 bg-slate-950">
-          <div className="text-center">
-            <Loader2
-              size={32}
-              className="mx-auto animate-spin text-emerald-400"
-            />
+          if (
+            stored &&
+            stored.trim()
+          ) {
+            return stored.trim();
+          }
+        }
 
-            <p className="mt-4 text-sm text-slate-400">
-              Chargement des offres...
-            </p>
-          </div>
-        </div>
-      </div>
+        /* ------------------------------------------------------
+           2. AUTH USER
+        ------------------------------------------------------ */
+
+        const {
+          data: {
+            user,
+          },
+        } =
+          await supabase.auth.getUser();
+
+        if (user?.id) {
+          const id =
+            String(user.id);
+
+          if (
+            typeof window !==
+            "undefined"
+          ) {
+            localStorage.setItem(
+              "profile_id",
+              id
+            );
+          }
+
+          return id;
+        }
+
+        /* ------------------------------------------------------
+           3. FIRST PROFILE
+        ------------------------------------------------------ */
+
+        const {
+          data: profile,
+          error,
+        } =
+          await supabase
+            .from("profiles")
+            .select("id")
+            .limit(1)
+            .maybeSingle();
+
+        if (error) {
+          throw new Error(
+            error.message
+          );
+        }
+
+        if (!profile?.id) {
+          throw new Error(
+            "Aucun profil trouvé dans Supabase."
+          );
+        }
+
+        const id =
+          String(profile.id);
+
+        if (
+          typeof window !==
+          "undefined"
+        ) {
+          localStorage.setItem(
+            "profile_id",
+            id
+          );
+        }
+
+        return id;
+      },
+      [supabase]
     );
+
+  /* ==========================================================
+     ENRICH COMPANY NAMES
+  ========================================================== */
+
+  const enrichCompanies =
+    useCallback(
+      async (
+        sourceJobs: Job[]
+      ): Promise<Job[]> => {
+        if (
+          !sourceJobs ||
+          sourceJobs.length ===
+            0
+        ) {
+          return [];
+        }
+
+        /* ------------------------------------------------------
+           GET UNIQUE COMPANY IDS
+        ------------------------------------------------------ */
+
+        const companyIds =
+          Array.from(
+            new Set(
+              sourceJobs
+                .map(
+                  (job) =>
+                    job.company_id
+                )
+                .filter(Boolean)
+                .map(String)
+            )
+          );
+
+        /* ------------------------------------------------------
+           NO COMPANY IDS
+        ------------------------------------------------------ */
+
+        if (
+          companyIds.length ===
+          0
+        ) {
+          return sourceJobs.map(
+            (job) => ({
+              ...job,
+
+              company:
+                job.company ||
+                job.company_name ||
+                "Entreprise non renseignée",
+            })
+          );
+        }
+
+        /* ------------------------------------------------------
+           GET COMPANIES
+
+           IMPORTANT :
+           select("*") évite les erreurs dues à
+           name/company_name/company si une seule
+           de ces colonnes existe réellement.
+        ------------------------------------------------------ */
+
+        const {
+          data,
+          error,
+        } =
+          await supabase
+            .from("companies")
+            .select("*")
+            .in(
+              "id",
+              companyIds
+            );
+
+        if (error) {
+          console.error(
+            "COMPANIES ERROR:",
+            error,
+            JSON.stringify(
+              error,
+              null,
+              2
+            )
+          );
+
+          /*
+           * IMPORTANT :
+           * Une erreur sur companies ne doit pas
+           * empêcher l'affichage des jobs.
+           */
+
+          return sourceJobs.map(
+            (job) => ({
+              ...job,
+
+              company:
+                job.company ||
+                job.company_name ||
+                "Entreprise non renseignée",
+            })
+          );
+        }
+
+        /* ------------------------------------------------------
+           COMPANY MAP
+        ------------------------------------------------------ */
+
+        const companies =
+          (data || []) as Company[];
+
+        const companyMap =
+          new Map<
+            string,
+            string
+          >();
+
+        for (const company of companies) {
+          const name =
+            company.name ||
+            company.company_name ||
+            company.company ||
+            company.title ||
+            null;
+
+          if (name) {
+            companyMap.set(
+              String(
+                company.id
+              ),
+              name
+            );
+          }
+        }
+
+        /* ------------------------------------------------------
+           MERGE
+        ------------------------------------------------------ */
+
+        return sourceJobs.map(
+          (job) => {
+            const companyName =
+              job.company ||
+              job.company_name ||
+              (job.company_id
+                ? companyMap.get(
+                    String(
+                      job.company_id
+                    )
+                  ) || null
+                : null) ||
+              "Entreprise non renseignée";
+
+            return {
+              ...job,
+
+              company:
+                companyName,
+
+              company_name:
+                companyName,
+            };
+          }
+        );
+      },
+      [supabase]
+    );
+
+  /* ==========================================================
+     GET SAVED IDS
+  ========================================================== */
+
+  const getSavedIds =
+    useCallback(
+      async (
+        currentProfileId: string
+      ): Promise<Set<string>> => {
+        const {
+          data,
+          error,
+        } =
+          await supabase
+            .from("saved_jobs")
+            .select("job_id")
+            .eq(
+              "profile_id",
+              currentProfileId
+            );
+
+        if (error) {
+          console.error(
+            "SAVED JOBS ERROR:",
+            error,
+            JSON.stringify(
+              error,
+              null,
+              2
+            )
+          );
+
+          return new Set();
+        }
+
+        return new Set(
+          (data || []).map(
+            (item: any) =>
+              String(
+                item.job_id
+              )
+          )
+        );
+      },
+      [supabase]
+    );
+
+  /* ==========================================================
+     LOAD ALL JOBS
+  ========================================================== */
+
+  const fetchJobs =
+    useCallback(
+      async () => {
+        setIsLoading(true);
+        setErrorMessage(null);
+
+        try {
+          /* ----------------------------------------------------
+             PROFILE
+          ---------------------------------------------------- */
+
+          const currentProfileId =
+            await getProfileId();
+
+          setProfileId(
+            currentProfileId
+          );
+
+          /* ----------------------------------------------------
+             GET JOBS
+
+             IMPORTANT :
+             "domaine" et non "domain".
+          ---------------------------------------------------- */
+
+          const {
+            data,
+            error,
+          } =
+            await supabase
+              .from("jobs")
+              .select(`
+                id,
+                created_at,
+                company_id,
+                title,
+                description,
+                location,
+                contract_type,
+                remote,
+                salary_min,
+                salary_max,
+                currency,
+                experience_level,
+                skills,
+                published_at,
+                source,
+                external_id,
+                url,
+                domaine,
+                sous_domaine,
+                classification_score
+              `)
+              .order(
+                "created_at",
+                {
+                  ascending:
+                    false,
+                }
+              );
+
+          if (error) {
+            console.error(
+              "JOBS ERROR:",
+              error,
+              JSON.stringify(
+                error,
+                null,
+                2
+              )
+            );
+
+            throw new Error(
+              error.message ||
+                "Impossible de récupérer les offres."
+            );
+          }
+
+          let loadedJobs =
+            (data || []) as Job[];
+
+          console.log(
+            "TOTAL JOBS CHARGÉS:",
+            loadedJobs.length
+          );
+
+          /* ----------------------------------------------------
+             COMPANIES
+          ---------------------------------------------------- */
+
+          loadedJobs =
+            await enrichCompanies(
+              loadedJobs
+            );
+
+          /* ----------------------------------------------------
+             SAVED JOBS
+          ---------------------------------------------------- */
+
+          const savedIds =
+            await getSavedIds(
+              currentProfileId
+            );
+
+          /* ----------------------------------------------------
+             NORMALIZE
+          ---------------------------------------------------- */
+
+          loadedJobs =
+            loadedJobs.map(
+              (job) => ({
+                ...job,
+
+                is_saved:
+                  savedIds.has(
+                    String(
+                      job.id
+                    )
+                  ),
+
+                score:
+                  null,
+
+                match_score:
+                  null,
+
+                matched_skills:
+                  null,
+
+                missing_skills:
+                  null,
+
+                ai_summary:
+                  null,
+
+                ai_analysis:
+                  null,
+
+                recommendation:
+                  null,
+              })
+            );
+
+          setJobs(
+            loadedJobs
+          );
+
+          console.log(
+            "OFFRES AFFICHÉES:",
+            loadedJobs.length
+          );
+        } catch (error) {
+          console.error(
+            "LOAD JOBS ERROR:",
+            error
+          );
+
+          setErrorMessage(
+            error instanceof Error
+              ? error.message
+              : "Impossible de charger les offres."
+          );
+        } finally {
+          setIsLoading(false);
+        }
+      },
+      [
+        enrichCompanies,
+        getProfileId,
+        getSavedIds,
+        supabase,
+      ]
+    );
+
+  /* ==========================================================
+     INITIAL LOAD
+  ========================================================== */
+
+  useEffect(() => {
+    fetchJobs();
+  }, [fetchJobs]);
+
+  /* ==========================================================
+     SEARCH
+  ========================================================== */
+
+  const filteredJobs =
+    useMemo(() => {
+      const search =
+        searchTerm
+          .trim()
+          .toLowerCase();
+
+      if (!search) {
+        return jobs;
+      }
+
+      return jobs.filter(
+        (job) => {
+          const text = [
+            job.title,
+            job.company,
+            job.company_name,
+            job.source,
+            job.location,
+            job.domaine,
+            job.sous_domaine,
+            job.description,
+            Array.isArray(
+              job.skills
+            )
+              ? job.skills.join(
+                  " "
+                )
+              : job.skills,
+            job.contract_type,
+            job.experience_level,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+
+          return text.includes(
+            search
+          );
+        }
+      );
+    }, [
+      jobs,
+      searchTerm,
+    ]);
+
+  /* ==========================================================
+     MATCHING
+  ========================================================== */
+
+  const handleRunMatching =
+    async () => {
+      if (isAnalyzing) {
+        return;
+      }
+
+      setIsAnalyzing(true);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+
+      try {
+        /* ------------------------------------------------------
+           PROFILE
+        ------------------------------------------------------ */
+
+        const currentProfileId =
+          profileId ||
+          (await getProfileId());
+
+        setProfileId(
+          currentProfileId
+        );
+
+        console.log(
+          "================================="
+        );
+
+        console.log(
+          "LANCEMENT MATCHING"
+        );
+
+        console.log(
+          "PROFILE:",
+          currentProfileId
+        );
+
+        console.log(
+          "================================="
+        );
+
+        /* ------------------------------------------------------
+           CALL NEXT.JS API
+        ------------------------------------------------------ */
+
+        const response =
+          await fetch(
+            "/api/jobs/match",
+            {
+              method: "POST",
+
+              headers: {
+                "Content-Type":
+                  "application/json",
+
+                Accept:
+                  "application/json",
+              },
+
+              body: JSON.stringify({
+                profile_id:
+                  currentProfileId,
+              }),
+
+              cache:
+                "no-store",
+            }
+          );
+
+        /* ------------------------------------------------------
+           RESPONSE
+        ------------------------------------------------------ */
+
+        const raw =
+          await response.text();
+
+        let data: any = {};
+
+        if (
+          raw &&
+          raw.trim()
+        ) {
+          try {
+            data =
+              JSON.parse(
+                raw
+              );
+          } catch {
+            console.error(
+              "MATCHING RAW RESPONSE:",
+              raw
+            );
+
+            throw new Error(
+              "La réponse du matching n'est pas un JSON valide."
+            );
+          }
+        }
+
+        console.log(
+          "MATCHING RESPONSE:",
+          data
+        );
+
+        /* ------------------------------------------------------
+           HTTP ERROR
+        ------------------------------------------------------ */
+
+        if (!response.ok) {
+          throw new Error(
+            data?.error ||
+              data?.message ||
+              data?.details ||
+              `Erreur HTTP ${response.status}`
+          );
+        }
+
+        if (
+          data?.success ===
+          false
+        ) {
+          throw new Error(
+            data?.error ||
+              data?.message ||
+              "Le matching a échoué."
+          );
+        }
+
+        /* ------------------------------------------------------
+           EXTRACT MATCHED JOBS
+        ------------------------------------------------------ */
+
+        let rawMatchedJobs: any[] =
+          [];
+
+        if (
+          Array.isArray(
+            data?.jobs
+          )
+        ) {
+          rawMatchedJobs =
+            data.jobs;
+        } else if (
+          Array.isArray(
+            data?.matches
+          )
+        ) {
+          rawMatchedJobs =
+            data.matches;
+        } else if (
+          Array.isArray(data)
+        ) {
+          rawMatchedJobs =
+            data;
+        }
+
+        console.log(
+          "OFFRES MATCHÉES REÇUES:",
+          rawMatchedJobs.length
+        );
+
+        /* ------------------------------------------------------
+           NORMALIZATION
+        ------------------------------------------------------ */
+
+        const normalizedJobs: Job[] =
+          rawMatchedJobs
+            .map(
+              (
+                item: any
+              ): Job | null => {
+                /*
+                 * n8n peut retourner :
+                 *
+                 * {
+                 *   job: {...},
+                 *   score: 80
+                 * }
+                 *
+                 * ou :
+                 *
+                 * {
+                 *   id: "...",
+                 *   title: "...",
+                 *   score: 80
+                 * }
+                 */
+
+                let job: any =
+                  item;
+
+                if (
+                  item?.job &&
+                  typeof item.job ===
+                    "object"
+                ) {
+                  job =
+                    item.job;
+                }
+
+                /* ------------------------------------------------
+                   ID
+                ------------------------------------------------ */
+
+                if (
+                  !job?.id &&
+                  item?.job_id
+                ) {
+                  job = {
+                    ...job,
+
+                    id:
+                      item.job_id,
+                  };
+                }
+
+                if (!job?.id) {
+                  return null;
+                }
+
+                /* ------------------------------------------------
+                   SCORE
+                ------------------------------------------------ */
+
+                const score =
+                  Number(
+                    item?.score ??
+                      item?.match_score ??
+                      job?.score ??
+                      job?.match_score ??
+                      0
+                  );
+
+                /* ------------------------------------------------
+                   RETURN
+                ------------------------------------------------ */
+
+                return {
+                  ...job,
+
+                  id: job.id,
+
+                  score,
+
+                  match_score:
+                    score,
+
+                  matched_skills:
+                    item?.matched_skills ??
+                    job?.matched_skills ??
+                    null,
+
+                  missing_skills:
+                    item?.missing_skills ??
+                    job?.missing_skills ??
+                    null,
+
+                  ai_summary:
+                    item?.ai_summary ??
+                    job?.ai_summary ??
+                    item?.summary ??
+                    job?.summary ??
+                    null,
+
+                  ai_analysis:
+                    item?.ai_analysis ??
+                    job?.ai_analysis ??
+                    null,
+
+                  recommendation:
+                    item?.recommendation ??
+                    job?.recommendation ??
+                    null,
+
+                  /* IMPORTANT :
+                     garder le vrai champ domaine */
+                  domaine:
+                    job?.domaine ??
+                    null,
+
+                  sous_domaine:
+                    job?.sous_domaine ??
+                    null,
+                };
+              }
+            )
+            .filter(
+              (
+                job
+              ): job is Job =>
+                job !== null
+            );
+
+        /* ------------------------------------------------------
+           SCORE >= 60
+        ------------------------------------------------------ */
+
+        const matchingJobs =
+          normalizedJobs.filter(
+            (job) =>
+              Number(
+                job.match_score ??
+                  job.score ??
+                  0
+              ) >= 60
+          );
+
+        /* ------------------------------------------------------
+           ENRICH COMPANIES
+        ------------------------------------------------------ */
+
+        let finalJobs =
+          await enrichCompanies(
+            matchingJobs
+          );
+
+        /* ------------------------------------------------------
+           SAVED
+        ------------------------------------------------------ */
+
+        const savedIds =
+          await getSavedIds(
+            currentProfileId
+          );
+
+        finalJobs =
+          finalJobs.map(
+            (job) => ({
+              ...job,
+
+              is_saved:
+                savedIds.has(
+                  String(
+                    job.id
+                  )
+                ),
+            })
+          );
+
+        /* ------------------------------------------------------
+           SORT SCORE DESC
+        ------------------------------------------------------ */
+
+        finalJobs.sort(
+          (a, b) =>
+            Number(
+              b.match_score ??
+                b.score ??
+                0
+            ) -
+            Number(
+              a.match_score ??
+                a.score ??
+                0
+            )
+        );
+
+        /* ------------------------------------------------------
+           DISPLAY ONLY MATCHES
+        ------------------------------------------------------ */
+
+        setJobs(
+          finalJobs
+        );
+
+        /* ------------------------------------------------------
+           TOTAL
+        ------------------------------------------------------ */
+
+        const totalReceived =
+          Number(
+            data?.total_jobs_received ??
+              data?.total_jobs ??
+              1000
+          );
+
+        const minimumScore =
+          Number(
+            data?.minimum_score ??
+              60
+          );
+
+        /* ------------------------------------------------------
+           SUCCESS
+        ------------------------------------------------------ */
+
+        setSuccessMessage(
+          `Matching terminé : ${finalJobs.length} offre(s) correspondante(s) parmi ${totalReceived} offres. Seuil : ${minimumScore}%.`
+        );
+
+        console.log(
+          "================================="
+        );
+
+        console.log(
+          "MATCHING TERMINÉ"
+        );
+
+        console.log(
+          "TOTAL OFFRES:",
+          totalReceived
+        );
+
+        console.log(
+          "MATCHES:",
+          finalJobs.length
+        );
+
+        console.log(
+          "SEUIL:",
+          minimumScore
+        );
+
+        console.log(
+          "================================="
+        );
+      } catch (error) {
+        console.error(
+          "MATCHING ERROR:",
+          error
+        );
+
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Erreur lors du matching."
+        );
+      } finally {
+        setIsAnalyzing(
+          false
+        );
+      }
+    };
+
+  /* ==========================================================
+     RELOAD ALL
+  ========================================================== */
+
+  const handleReloadAll =
+    async () => {
+      setSuccessMessage(null);
+      setErrorMessage(null);
+
+      await fetchJobs();
+
+      setSuccessMessage(
+        "Toutes les offres ont été rechargées."
+      );
+    };
+
+  /* ==========================================================
+     SAVE JOB
+  ========================================================== */
+
+  const handleSaveJob =
+    async (job: Job) => {
+      if (
+        savingJobId !== null
+      ) {
+        return;
+      }
+
+      try {
+        setSavingJobId(
+          job.id
+        );
+
+        setErrorMessage(null);
+        setSuccessMessage(null);
+
+        const currentProfileId =
+          profileId ||
+          (await getProfileId());
+
+        setProfileId(
+          currentProfileId
+        );
+
+        /* ------------------------------------------------------
+           DELETE
+        ------------------------------------------------------ */
+
+        if (job.is_saved) {
+          const {
+            error,
+          } =
+            await supabase
+              .from("saved_jobs")
+              .delete()
+              .eq(
+                "profile_id",
+                currentProfileId
+              )
+              .eq(
+                "job_id",
+                job.id
+              );
+
+          if (error) {
+            throw error;
+          }
+
+          setJobs(
+            (current) =>
+              current.map(
+                (item) =>
+                  String(
+                    item.id
+                  ) ===
+                  String(
+                    job.id
+                  )
+                    ? {
+                        ...item,
+
+                        is_saved:
+                          false,
+                      }
+                    : item
+              )
+          );
+
+          if (
+            selectedJob &&
+            String(
+              selectedJob.id
+            ) ===
+              String(
+                job.id
+              )
+          ) {
+            setSelectedJob({
+              ...selectedJob,
+
+              is_saved:
+                false,
+            });
+          }
+
+          setSuccessMessage(
+            "Offre retirée des offres sauvegardées."
+          );
+
+          return;
+        }
+
+        /* ------------------------------------------------------
+           INSERT
+        ------------------------------------------------------ */
+
+        const {
+          error,
+        } =
+          await supabase
+            .from("saved_jobs")
+            .insert({
+              profile_id:
+                currentProfileId,
+
+              job_id:
+                job.id,
+            });
+
+        if (error) {
+          if (
+            error.code ===
+            "23505"
+          ) {
+            setSuccessMessage(
+              "Cette offre est déjà sauvegardée."
+            );
+
+            return;
+          }
+
+          throw error;
+        }
+
+        setJobs(
+          (current) =>
+            current.map(
+              (item) =>
+                String(
+                  item.id
+                ) ===
+                String(
+                  job.id
+                )
+                  ? {
+                      ...item,
+
+                      is_saved:
+                        true,
+                    }
+                  : item
+            )
+        );
+
+        if (
+          selectedJob &&
+          String(
+            selectedJob.id
+          ) ===
+            String(
+              job.id
+            )
+        ) {
+          setSelectedJob({
+            ...selectedJob,
+
+            is_saved: true,
+          });
+        }
+
+        setSuccessMessage(
+          "Offre sauvegardée avec succès."
+        );
+      } catch (error) {
+        console.error(
+          "SAVE JOB ERROR:",
+          error
+        );
+
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Impossible de sauvegarder l'offre."
+        );
+      } finally {
+        setSavingJobId(
+          null
+        );
+      }
+    };
+
+  /* ==========================================================
+     APPLY
+  ========================================================== */
+
+  const handleApply =
+    (job: Job) => {
+      if (job.url) {
+        window.open(
+          job.url,
+          "_blank",
+          "noopener,noreferrer"
+        );
+
+        return;
+      }
+
+      setSelectedJob(
+        job
+      );
+    };
+
+  /* ==========================================================
+     SCORE STYLE
+  ========================================================== */
+
+  function getScoreStyle(
+    score:
+      | number
+      | null
+      | undefined
+  ) {
+    const value =
+      Number(score || 0);
+
+    if (value >= 80) {
+      return {
+        badge:
+          "border-emerald-200 bg-emerald-50 text-emerald-700",
+
+        progress:
+          "bg-emerald-500",
+
+        label:
+          "Excellent match",
+      };
+    }
+
+    if (value >= 60) {
+      return {
+        badge:
+          "border-green-200 bg-green-50 text-green-700",
+
+        progress:
+          "bg-green-500",
+
+        label:
+          "Bon match",
+      };
+    }
+
+    if (value >= 40) {
+      return {
+        badge:
+          "border-amber-200 bg-amber-50 text-amber-700",
+
+        progress:
+          "bg-amber-500",
+
+        label:
+          "Match moyen",
+      };
+    }
+
+    return {
+      badge:
+        "border-slate-200 bg-slate-50 text-slate-600",
+
+      progress:
+        "bg-slate-400",
+
+      label:
+        "Match faible",
+    };
   }
 
-  // ==========================================
-  // ERROR
-  // ==========================================
+  /* ==========================================================
+     STATS
+  ========================================================== */
 
-  if (error) {
-    return (
-      <div className="space-y-8">
-        <div>
-          <h1 className="text-2xl font-bold text-white">
-            Offres recommandées
-          </h1>
+  const matchingCount =
+    jobs.filter(
+      (job) =>
+        job.match_score !=
+          null &&
+        Number(
+          job.match_score
+        ) >= 60
+    ).length;
 
-          <p className="mt-2 text-sm text-slate-400">
-            Les offres correspondant à votre profil.
-          </p>
-        </div>
+  const savedCount =
+    jobs.filter(
+      (job) =>
+        job.is_saved
+    ).length;
 
-        <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-6">
-          <p className="font-medium text-red-400">
-            {error}
-          </p>
-
-          <button
-            type="button"
-            onClick={loadJobs}
-            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-red-500/10 px-4 py-2 text-sm font-medium text-red-300 transition hover:bg-red-500/20"
-          >
-            <RefreshCw size={16} />
-            Réessayer
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // ==========================================
-  // AUCUN MATCH
-  // ==========================================
-
-  if (matches.length === 0) {
-    return (
-      <div className="space-y-8">
-        <div>
-          <h1 className="text-2xl font-bold text-white">
-            Offres recommandées
-          </h1>
-
-          <p className="mt-2 text-sm text-slate-400">
-            Les offres correspondant à votre profil.
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-800 bg-slate-950 p-12 text-center">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-900 text-slate-500">
-            <Briefcase size={26} />
-          </div>
-
-          <h2 className="mt-5 text-lg font-semibold text-white">
-            Aucune offre matchée pour le moment.
-          </h2>
-
-          <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-400">
-            Aucune correspondance n&apos;a encore été trouvée
-            pour votre profil.
-          </p>
-
-          <button
-            type="button"
-            onClick={loadJobs}
-            className="mx-auto mt-5 inline-flex items-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700"
-          >
-            <RefreshCw size={16} />
-            Actualiser
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // ==========================================
-  // LISTE DES OFFRES
-  // ==========================================
+  /* ==========================================================
+     RENDER
+  ========================================================== */
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-white">
-          Offres recommandées
-        </h1>
+    <div className="min-h-screen bg-[#f8fafc]">
+      <div className="page-container">
 
-        <p className="mt-2 text-sm text-slate-400">
-          Les offres correspondant à votre profil.
-        </p>
+        {/* ====================================================
+            HEADER
+        ==================================================== */}
+
+        <header className="mb-7 animate-fade-in">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+
+            <div>
+              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
+                <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+
+                Recherche intelligente
+              </div>
+
+              <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+                Offres d'emploi
+              </h1>
+
+              <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">
+                Découvrez les opportunités qui correspondent
+                le mieux à votre profil et à vos compétences.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+
+              <button
+                type="button"
+                onClick={
+                  handleReloadAll
+                }
+                disabled={
+                  isAnalyzing ||
+                  isLoading
+                }
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RefreshCw
+                  className={`h-4 w-4 ${
+                    isLoading
+                      ? "animate-spin"
+                      : ""
+                  }`}
+                />
+
+                Toutes les offres
+              </button>
+
+              <button
+                type="button"
+                onClick={
+                  handleRunMatching
+                }
+                disabled={
+                  isAnalyzing ||
+                  isLoading
+                }
+                className="ai-button"
+              >
+                {isAnalyzing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+
+                    Analyse des 1000 offres...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4" />
+
+                    Lancer le matching IA
+                  </>
+                )}
+              </button>
+
+            </div>
+          </div>
+        </header>
+
+        {/* ====================================================
+            STATS
+        ==================================================== */}
+
+        {!isLoading && (
+          <div className="mb-6 grid gap-4 md:grid-cols-3">
+
+            <StatCard
+              label="Offres affichées"
+              value={jobs.length}
+              icon={
+                BriefcaseBusiness
+              }
+              delay="0ms"
+            />
+
+            <StatCard
+              label="Correspondances ≥ 60%"
+              value={
+                matchingCount
+              }
+              icon={Target}
+              green
+              delay="70ms"
+            />
+
+            <StatCard
+              label="Offres sauvegardées"
+              value={
+                savedCount
+              }
+              icon={Bookmark}
+              delay="140ms"
+            />
+
+          </div>
+        )}
+
+        {/* ====================================================
+            SEARCH
+        ==================================================== */}
+
+        <div className="saas-card mb-6 p-3 animate-fade-in">
+          <div className="relative">
+
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+
+            <input
+              type="text"
+              value={
+                searchTerm
+              }
+              onChange={(
+                event
+              ) =>
+                setSearchTerm(
+                  event.target.value
+                )
+              }
+              placeholder="Rechercher un poste, une entreprise, une localisation ou un domaine..."
+              className="w-full rounded-xl border-0 bg-slate-50 py-3.5 pl-12 pr-12 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-emerald-100"
+            />
+
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() =>
+                  setSearchTerm(
+                    ""
+                  )
+                }
+                className="absolute right-4 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+
+          </div>
+        </div>
+
+        {/* ====================================================
+            ERROR
+        ==================================================== */}
+
+        {errorMessage && (
+          <div className="mb-5 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 animate-fade-scale">
+
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+
+            <div>
+              <p className="font-bold">
+                Une erreur est survenue
+              </p>
+
+              <p className="mt-1 leading-5">
+                {errorMessage}
+              </p>
+            </div>
+
+          </div>
+        )}
+
+        {/* ====================================================
+            SUCCESS
+        ==================================================== */}
+
+        {successMessage && (
+          <div className="mb-5 flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700 animate-fade-scale">
+
+            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
+
+            <div>
+              <p className="font-bold">
+                Matching terminé
+              </p>
+
+              <p className="mt-1">
+                {successMessage}
+              </p>
+            </div>
+
+          </div>
+        )}
+
+        {/* ====================================================
+            LOADING
+        ==================================================== */}
+
+        {isLoading ? (
+          <div className="saas-card flex min-h-[360px] flex-col items-center justify-center">
+
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50">
+              <Loader2 className="h-7 w-7 animate-spin text-emerald-600" />
+            </div>
+
+            <p className="mt-5 text-sm font-semibold text-slate-700">
+              Chargement des offres...
+            </p>
+
+            <p className="mt-1 text-xs text-slate-400">
+              Récupération des opportunités disponibles
+            </p>
+
+          </div>
+        ) : filteredJobs.length === 0 ? (
+          <EmptyState
+            hasSearch={
+              searchTerm.length > 0
+            }
+          />
+        ) : (
+          <div className="space-y-5">
+
+            {filteredJobs.map(
+              (
+                job,
+                index
+              ) => {
+                const score =
+                  Number(
+                    job.match_score ??
+                      job.score ??
+                      0
+                  );
+
+                const hasScore =
+                  job.match_score !=
+                    null ||
+                  job.score != null;
+
+                const scoreStyle =
+                  getScoreStyle(
+                    score
+                  );
+
+                const matchedSkills =
+                  parseSkills(
+                    job.matched_skills
+                  );
+
+                const missingSkills =
+                  parseSkills(
+                    job.missing_skills
+                  );
+
+                return (
+                  <article
+                    key={String(
+                      job.id
+                    )}
+                    style={{
+                      animationDelay: `${index * 60}ms`,
+                    }}
+                    className="saas-card overflow-hidden animate-fade-in"
+                  >
+
+                    {/* JOB */}
+
+                    <div className="p-6">
+
+                      <div className="flex flex-col gap-6 xl:flex-row xl:justify-between">
+
+                        <div className="min-w-0 flex-1">
+
+                          <div className="flex flex-wrap items-center gap-2">
+
+                            {job.domaine && (
+                              <span className="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-bold text-emerald-700">
+                                {job.domaine}
+                              </span>
+                            )}
+
+                            {job.sous_domaine && (
+                              <span className="rounded-full bg-green-50 px-3 py-1 text-[11px] font-bold text-green-700">
+                                {job.sous_domaine}
+                              </span>
+                            )}
+
+                            {job.source && (
+                              <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-600">
+                                {job.source}
+                              </span>
+                            )}
+
+                          </div>
+
+                          <h2 className="mt-3 text-xl font-bold leading-snug text-slate-900">
+                            {job.title ||
+                              "Titre non spécifié"}
+                          </h2>
+
+                          <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-500">
+
+                            <span className="inline-flex items-center gap-1.5">
+                              <Building2 className="h-4 w-4 text-slate-400" />
+
+                              {job.company ||
+                                job.company_name ||
+                                "Entreprise non spécifiée"}
+                            </span>
+
+                            <span className="inline-flex items-center gap-1.5">
+                              <MapPin className="h-4 w-4 text-slate-400" />
+
+                              {job.location ||
+                                "Localisation non spécifiée"}
+                            </span>
+
+                            {job.contract_type && (
+                              <span className="inline-flex items-center gap-1.5">
+                                <BriefcaseBusiness className="h-4 w-4 text-slate-400" />
+
+                                {job.contract_type}
+                              </span>
+                            )}
+
+                            {job.remote && (
+                              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                                Télétravail
+                              </span>
+                            )}
+
+                          </div>
+
+                        </div>
+
+                        {/* SCORE */}
+
+                        {hasScore && (
+                          <div className="shrink-0 xl:w-44">
+
+                            <div
+                              className={`rounded-2xl border p-4 ${scoreStyle.badge}`}
+                            >
+
+                              <div className="flex items-center justify-between">
+
+                                <span className="text-[10px] font-bold uppercase tracking-wider">
+                                  Match IA
+                                </span>
+
+                                <BrainCircuit className="h-4 w-4" />
+
+                              </div>
+
+                              <div className="mt-2 flex items-end gap-1">
+
+                                <span className="text-3xl font-black">
+                                  {score}
+                                </span>
+
+                                <span className="mb-1 text-sm font-bold">
+                                  /100
+                                </span>
+
+                              </div>
+
+                              <p className="mt-1 text-[11px] font-semibold">
+                                {scoreStyle.label}
+                              </p>
+
+                            </div>
+
+                          </div>
+                        )}
+
+                      </div>
+
+                      {/* SCORE BAR */}
+
+                      {hasScore && (
+                        <div className="mt-6">
+
+                          <div className="mb-2 flex items-center justify-between">
+
+                            <span className="text-[11px] font-semibold text-slate-400">
+                              Compatibilité avec votre profil
+                            </span>
+
+                            <span className="text-[11px] font-bold text-slate-500">
+                              {score}%
+                            </span>
+
+                          </div>
+
+                          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+
+                            <div
+                              className={`h-full rounded-full transition-all duration-1000 ${scoreStyle.progress}`}
+                              style={{
+                                width: `${Math.min(
+                                  100,
+                                  Math.max(
+                                    0,
+                                    score
+                                  )
+                                )}%`,
+                              }}
+                            />
+
+                          </div>
+
+                        </div>
+                      )}
+
+                      {/* DESCRIPTION */}
+
+                      {job.description && (
+                        <p className="mt-5 line-clamp-4 text-sm leading-6 text-slate-600">
+                          {job.description}
+                        </p>
+                      )}
+
+                      {/* SALARY */}
+
+                      {(job.salary_min !=
+                        null ||
+                        job.salary_max !=
+                          null) && (
+                        <div className="mt-5">
+
+                          <span className="inline-flex rounded-xl bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700">
+
+                            💰{" "}
+
+                            {job.salary_min !=
+                            null
+                              ? job.salary_min
+                              : ""}
+
+                            {job.salary_min !=
+                              null &&
+                            job.salary_max !=
+                              null
+                              ? " - "
+                              : ""}
+
+                            {job.salary_max !=
+                            null
+                              ? job.salary_max
+                              : ""}
+
+                            {job.currency
+                              ? ` ${job.currency}`
+                              : ""}
+
+                          </span>
+
+                        </div>
+                      )}
+
+                      {/* SKILLS */}
+
+                      {(matchedSkills.length >
+                        0 ||
+                        missingSkills.length >
+                          0) && (
+                        <div className="mt-5 grid gap-4 md:grid-cols-2">
+
+                          {matchedSkills.length >
+                            0 && (
+                            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4">
+
+                              <p className="text-xs font-bold text-emerald-700">
+                                ✓ Compétences correspondantes
+                              </p>
+
+                              <div className="mt-3 flex flex-wrap gap-2">
+
+                                {matchedSkills.map(
+                                  (
+                                    skill,
+                                    skillIndex
+                                  ) => (
+                                    <span
+                                      key={`${skill}-${skillIndex}`}
+                                      className="rounded-lg border border-emerald-100 bg-white px-2.5 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm"
+                                    >
+                                      {skill}
+                                    </span>
+                                  )
+                                )}
+
+                              </div>
+
+                            </div>
+                          )}
+
+                          {missingSkills.length >
+                            0 && (
+                            <div className="rounded-2xl border border-amber-100 bg-amber-50/50 p-4">
+
+                              <p className="text-xs font-bold text-amber-700">
+                                + Compétences à développer
+                              </p>
+
+                              <div className="mt-3 flex flex-wrap gap-2">
+
+                                {missingSkills.map(
+                                  (
+                                    skill,
+                                    skillIndex
+                                  ) => (
+                                    <span
+                                      key={`${skill}-${skillIndex}`}
+                                      className="rounded-lg border border-amber-100 bg-white px-2.5 py-1.5 text-xs font-semibold text-amber-700 shadow-sm"
+                                    >
+                                      {skill}
+                                    </span>
+                                  )
+                                )}
+
+                              </div>
+
+                            </div>
+                          )}
+
+                        </div>
+                      )}
+
+                      {/* AI */}
+
+                      {(job.ai_analysis ||
+                        job.ai_summary ||
+                        job.recommendation) && (
+                        <div className="mt-6 rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-5">
+
+                          <div className="flex items-center gap-3">
+
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100">
+                              <Sparkles className="h-5 w-5 text-emerald-600" />
+                            </div>
+
+                            <div>
+
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">
+                                Intelligence artificielle
+                              </p>
+
+                              <p className="mt-0.5 text-sm font-bold text-slate-900">
+                                Analyse de compatibilité
+                              </p>
+
+                            </div>
+
+                          </div>
+
+                          {(job.ai_analysis ||
+                            job.ai_summary) && (
+                            <p className="mt-4 text-sm leading-6 text-slate-700">
+                              {job.ai_analysis ||
+                                job.ai_summary}
+                            </p>
+                          )}
+
+                          {job.recommendation && (
+                            <div className="mt-4 rounded-xl border border-emerald-100 bg-white p-3">
+
+                              <p className="text-xs font-bold text-emerald-700">
+                                💡 Recommandation
+                              </p>
+
+                              <p className="mt-1 text-sm font-medium text-slate-700">
+                                {job.recommendation}
+                              </p>
+
+                            </div>
+                          )}
+
+                        </div>
+                      )}
+
+                    </div>
+
+                    {/* ACTIONS */}
+
+                    <div className="flex flex-col gap-3 border-t border-slate-100 bg-slate-50/70 px-6 py-4 sm:flex-row sm:items-center">
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSelectedJob(
+                            job
+                          )
+                        }
+                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
+                      >
+                        <Eye className="h-4 w-4" />
+
+                        Voir les détails
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleSaveJob(
+                            job
+                          )
+                        }
+                        disabled={
+                          savingJobId ===
+                          job.id
+                        }
+                        className={[
+                          "inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition",
+                          job.is_saved
+                            ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                            : "border-slate-200 bg-white text-slate-700 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700",
+                        ].join(
+                          " "
+                        )}
+                      >
+
+                        {savingJobId ===
+                        job.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : job.is_saved ? (
+                          <BookmarkCheck className="h-4 w-4" />
+                        ) : (
+                          <Bookmark className="h-4 w-4" />
+                        )}
+
+                        {job.is_saved
+                          ? "Sauvegardée"
+                          : "Sauvegarder"}
+
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleApply(
+                            job
+                          )
+                        }
+                        className="sm:ml-auto inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-md"
+                      >
+
+                        Postuler
+
+                        <ExternalLink className="h-4 w-4" />
+
+                      </button>
+
+                    </div>
+
+                  </article>
+                );
+              }
+            )}
+
+          </div>
+        )}
+
       </div>
+
+      {/* ========================================================
+          MODAL
+      ======================================================== */}
+
+      {selectedJob && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm animate-fade-scale"
+          onClick={() =>
+            setSelectedJob(
+              null
+            )
+          }
+        >
+
+          <div
+            className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-3xl bg-white shadow-2xl"
+            onClick={(event) =>
+              event.stopPropagation()
+            }
+          >
+
+            {/* HEADER */}
+
+            <div className="sticky top-0 z-10 flex items-start justify-between border-b border-slate-100 bg-white/95 p-6 backdrop-blur">
+
+              <div className="pr-6">
+
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+
+                  <Sparkles className="h-3 w-3" />
+
+                  Offre analysée par IA
+
+                </span>
+
+                <h2 className="mt-3 text-2xl font-bold text-slate-900">
+                  {selectedJob.title ||
+                    "Offre d'emploi"}
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  {selectedJob.company ||
+                    selectedJob.company_name ||
+                    "Entreprise non spécifiée"}
+                </p>
+
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setSelectedJob(
+                    null
+                  )
+                }
+                className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+              >
+                <X className="h-5 w-5" />
+              </button>
+
+            </div>
+
+            {/* BODY */}
+
+            <div className="max-h-[calc(90vh-110px)] overflow-y-auto p-6">
+
+              <div className="grid gap-4 sm:grid-cols-2">
+
+                <ModalInfo
+                  icon={Building2}
+                  label="Entreprise"
+                  value={
+                    selectedJob.company ||
+                    selectedJob.company_name ||
+                    "Non spécifiée"
+                  }
+                />
+
+                <ModalInfo
+                  icon={MapPin}
+                  label="Localisation"
+                  value={
+                    selectedJob.location ||
+                    "Non spécifiée"
+                  }
+                />
+
+                <ModalInfo
+                  icon={
+                    BriefcaseBusiness
+                  }
+                  label="Domaine"
+                  value={
+                    selectedJob.domaine ||
+                    "Non spécifié"
+                  }
+                />
+
+                {selectedJob.match_score !=
+                  null && (
+                  <ModalInfo
+                    icon={Target}
+                    label="Score de matching"
+                    value={`${selectedJob.match_score}%`}
+                    green
+                  />
+                )}
+
+              </div>
+
+              {selectedJob.description && (
+                <section className="mt-7">
+
+                  <h3 className="mb-3 text-sm font-bold text-slate-900">
+                    Description du poste
+                  </h3>
+
+                  <div className="rounded-2xl bg-slate-50 p-5">
+
+                    <p className="whitespace-pre-line text-sm leading-7 text-slate-600">
+                      {selectedJob.description}
+                    </p>
+
+                  </div>
+
+                </section>
+              )}
+
+              {selectedJob.skills && (
+                <section className="mt-6">
+
+                  <h3 className="mb-3 text-sm font-bold text-slate-900">
+                    Compétences demandées
+                  </h3>
+
+                  <div className="rounded-2xl bg-slate-50 p-5">
+
+                    <p className="whitespace-pre-line text-sm leading-7 text-slate-600">
+                      {Array.isArray(
+                        selectedJob.skills
+                      )
+                        ? selectedJob.skills.join(
+                            ", "
+                          )
+                        : selectedJob.skills}
+                    </p>
+
+                  </div>
+
+                </section>
+              )}
+
+              {(selectedJob.ai_analysis ||
+                selectedJob.ai_summary) && (
+                <section className="mt-6 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-5">
+
+                  <div className="flex items-center gap-3">
+
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100">
+
+                      <Sparkles className="h-5 w-5 text-emerald-600" />
+
+                    </div>
+
+                    <h3 className="text-sm font-bold text-emerald-800">
+                      Analyse IA
+                    </h3>
+
+                  </div>
+
+                  <p className="mt-4 text-sm leading-7 text-slate-700">
+                    {selectedJob.ai_analysis ||
+                      selectedJob.ai_summary}
+                  </p>
+
+                </section>
+              )}
+
+              {selectedJob.recommendation && (
+                <div className="mt-4 rounded-xl bg-white p-4">
+
+                  <p className="text-xs font-bold text-emerald-700">
+                    💡 Recommandation
+                  </p>
+
+                  <p className="mt-1 text-sm font-medium text-slate-700">
+                    {selectedJob.recommendation}
+                  </p>
+
+                </div>
+              )}
+
+              {/* ACTIONS */}
+
+              <div className="mt-7 flex flex-col-reverse gap-3 border-t border-slate-100 pt-6 sm:flex-row sm:justify-end">
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleSaveJob(
+                      selectedJob
+                    )
+                  }
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+
+                  {selectedJob.is_saved ? (
+                    <BookmarkCheck className="h-4 w-4" />
+                  ) : (
+                    <Bookmark className="h-4 w-4" />
+                  )}
+
+                  {selectedJob.is_saved
+                    ? "Sauvegardée"
+                    : "Sauvegarder"}
+
+                </button>
+
+                {selectedJob.url && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleApply(
+                        selectedJob
+                      )
+                    }
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-700"
+                  >
+
+                    Postuler
+
+                    <ExternalLink className="h-4 w-4" />
+
+                  </button>
+                )}
+
+              </div>
+
+            </div>
+
+          </div>
+
+        </div>
+      )}
+
+    </div>
+  );
+}
+
+/* ============================================================
+   STAT CARD
+============================================================ */
+
+function StatCard({
+  label,
+  value,
+  icon: Icon,
+  green = false,
+  delay,
+}: {
+  label: string;
+  value: number;
+  icon: LucideIcon;
+  green?: boolean;
+  delay: string;
+}) {
+  return (
+    <div
+      style={{
+        animationDelay: delay,
+      }}
+      className="saas-card animate-fade-in p-5"
+    >
 
       <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-400">
-          {matches.length} offre
-          {matches.length > 1 ? "s" : ""} trouvée
-          {matches.length > 1 ? "s" : ""}
+
+        <div>
+
+          <p className="text-xs font-semibold text-slate-400">
+            {label}
+          </p>
+
+          <p
+            className={[
+              "mt-2 text-2xl font-black",
+              green
+                ? "text-emerald-600"
+                : "text-slate-900",
+            ].join(" ")}
+          >
+            {value}
+          </p>
+
+        </div>
+
+        <div
+          className={[
+            "flex h-11 w-11 items-center justify-center rounded-xl",
+            green
+              ? "bg-emerald-50 text-emerald-600"
+              : "bg-slate-50 text-slate-500",
+          ].join(" ")}
+        >
+          <Icon className="h-5 w-5" />
+        </div>
+
+      </div>
+
+    </div>
+  );
+}
+
+/* ============================================================
+   EMPTY STATE
+============================================================ */
+
+function EmptyState({
+  hasSearch,
+}: {
+  hasSearch: boolean;
+}) {
+  return (
+    <div className="saas-card flex min-h-[400px] flex-col items-center justify-center text-center">
+
+      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-50">
+
+        <Search className="h-7 w-7 text-emerald-500" />
+
+      </div>
+
+      <h2 className="mt-5 text-lg font-bold text-slate-900">
+
+        {hasSearch
+          ? "Aucune offre trouvée"
+          : "Aucune offre correspondante"}
+
+      </h2>
+
+      <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
+
+        {hasSearch
+          ? "Essayez avec un autre mot-clé, une autre entreprise ou une autre localisation."
+          : "Lancez le matching IA pour rechercher les offres qui correspondent à votre profil."}
+
+      </p>
+
+    </div>
+  );
+}
+
+/* ============================================================
+   MODAL INFO
+============================================================ */
+
+function ModalInfo({
+  icon: Icon,
+  label,
+  value,
+  green = false,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  green?: boolean;
+}) {
+  return (
+    <div
+      className={[
+        "rounded-2xl border p-4",
+        green
+          ? "border-emerald-100 bg-emerald-50"
+          : "border-slate-100 bg-slate-50",
+      ].join(" ")}
+    >
+
+      <div className="flex items-center gap-2">
+
+        <Icon
+          className={[
+            "h-4 w-4",
+            green
+              ? "text-emerald-600"
+              : "text-slate-400",
+          ].join(" ")}
+        />
+
+        <p className="text-xs font-medium text-slate-400">
+          {label}
         </p>
 
-        <span className="rounded-full bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-400">
-          Matches IA
-        </span>
       </div>
 
-      <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-        {matches.map((match) => (
-          <JobCard
-            key={match.id}
-            match={match}
-          />
-        ))}
-      </div>
+      <p
+        className={[
+          "mt-2 text-sm font-bold",
+          green
+            ? "text-emerald-700"
+            : "text-slate-800",
+        ].join(" ")}
+      >
+        {value}
+      </p>
+
     </div>
   );
 }

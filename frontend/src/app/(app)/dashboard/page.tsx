@@ -1,818 +1,352 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import Link from "next/link";
 
-import PageHeader from "@/components/dashboard/PageHeader";
-import KpiGrid from "@/components/dashboard/KpiGrid";
-import RecommendedJobs, {
-  type RecommendedJob,
-} from "@/components/dashboard/RecommendedJobs";
-import RecentActivity, {
-  type ActivityItem,
-} from "@/components/dashboard/RecentActivity";
-
-import { createClient } from "@/lib/supabase/client";
-
-interface DashboardStats {
-  profileCompletion: string;
-  totalJobs: string;
-  totalApplications: string;
-  averageMatch: string;
-  bestMatch: string;
-  recommendedJobs: string;
-  pendingApplications: string;
-  remoteJobs: string;
-  averageSalary: string;
-}
-
-interface JobRow {
-  id: string;
-  title: string | null;
-  location: string | null;
-  remote: boolean | null;
-  salary_min: number | null;
-  salary_max: number | null;
-  currency: string | null;
-}
-
-interface MatchRow {
-  id: number | string;
-  job_id: string | null;
-  score: number | null;
-  created_at: string;
-}
-
-interface ApplicationRow {
-  id: string;
-  job_id: string | null;
-  status: string | null;
-  applied_at: string | null;
-  created_at: string;
-}
-
-function formatSalary(
-  min: number | null,
-  max: number | null,
-  currency: string | null
-) {
-  if (
-    min === null &&
-    max === null
-  ) {
-    return "Salaire non précisé";
-  }
-
-  const currencyLabel =
-    currency?.trim() || "€";
-
-  if (
-    min !== null &&
-    max !== null
-  ) {
-    return `${min.toLocaleString("fr-FR")} – ${max.toLocaleString(
-      "fr-FR"
-    )} ${currencyLabel}`;
-  }
-
-  if (min !== null) {
-    return `À partir de ${min.toLocaleString(
-      "fr-FR"
-    )} ${currencyLabel}`;
-  }
-
-  return `Jusqu'à ${max?.toLocaleString(
-    "fr-FR"
-  )} ${currencyLabel}`;
-}
-
-function applicationStatusLabel(
-  status: string | null
-) {
-  if (!status) {
-    return "Candidature";
-  }
-
-  const normalized =
-    status.toLowerCase().trim();
-
-  const labels: Record<string, string> = {
-    pending: "En attente",
-    submitted: "Envoyée",
-    applied: "Envoyée",
-    sent: "Envoyée",
-    interview: "Entretien",
-    accepted: "Acceptée",
-    rejected: "Refusée",
-    "en cours": "En cours",
-    envoyée: "Envoyée",
-    envoyee: "Envoyée",
-    entretien: "Entretien",
-    acceptee: "Acceptée",
-    acceptée: "Acceptée",
-    refusee: "Refusée",
-    refusée: "Refusée",
-  };
-
-  return labels[normalized] ?? status;
-}
+import {
+  ArrowRight,
+  BriefcaseBusiness,
+  CalendarDays,
+  FileText,
+  Sparkles,
+  Target,
+  TrendingUp,
+  Zap,
+} from "lucide-react";
 
 export default function DashboardPage() {
-  const [name, setName] =
-    useState("Utilisateur");
-
-  const [stats, setStats] =
-    useState<DashboardStats>({
-      profileCompletion: "0%",
-      totalJobs: "0",
-      totalApplications: "0",
-      averageMatch: "0%",
-      bestMatch: "0%",
-      recommendedJobs: "0",
-      pendingApplications: "0",
-      remoteJobs: "0",
-      averageSalary: "—",
-    });
-
-  const [recommendedJobs, setRecommendedJobs] =
-    useState<RecommendedJob[]>([]);
-
-  const [activities, setActivities] =
-    useState<ActivityItem[]>([]);
-
-  const [loading, setLoading] =
-    useState(true);
-
-  useEffect(() => {
-    async function loadDashboard() {
-      const supabase = createClient();
-
-      try {
-        // =====================================================
-        // 1. UTILISATEUR
-        // =====================================================
-
-        const {
-          data: { user },
-          error: userError,
-        } = await supabase.auth.getUser();
-
-        if (userError) {
-          console.error(
-            "Erreur utilisateur :",
-            userError
-          );
-
-          return;
-        }
-
-        if (!user) {
-          return;
-        }
-
-        const profileId = user.id;
-
-        // =====================================================
-        // 2. PROFILE
-        // =====================================================
-
-        const {
-          data: profile,
-          error: profileError,
-        } = await supabase
-          .from("profiles")
-          .select(
-            `
-              name,
-              email,
-              phone,
-              country,
-              city,
-              address,
-              date_of_birth,
-              skills
-            `
-          )
-          .eq("id", profileId)
-          .maybeSingle();
-
-        if (profileError) {
-          console.error(
-            "Erreur récupération profil :",
-            profileError
-          );
-        }
-
-        if (profile?.name) {
-          setName(profile.name);
-        }
-
-        // =====================================================
-        // 3. NOMBRE D'OFFRES
-        // =====================================================
-
-        const {
-          count: jobsCount,
-          error: jobsCountError,
-        } = await supabase
-          .from("jobs")
-          .select("id", {
-            count: "exact",
-            head: true,
-          });
-
-        if (jobsCountError) {
-          console.error(
-            "Erreur nombre offres :",
-            jobsCountError
-          );
-        }
-
-        // =====================================================
-        // 4. APPLICATIONS
-        // =====================================================
-
-        const {
-          data: applications,
-          count: applicationsCount,
-          error: applicationsError,
-        } = await supabase
-          .from("applications")
-          .select(
-            "id, job_id, status, applied_at, created_at",
-            {
-              count: "exact",
-            }
-          )
-          .eq("profile_id", profileId)
-          .order("created_at", {
-            ascending: false,
-          })
-          .limit(10);
-
-        if (applicationsError) {
-          console.error(
-            "Erreur récupération candidatures :",
-            applicationsError
-          );
-        }
-
-        // =====================================================
-        // 5. MATCHES
-        // =====================================================
-
-        const {
-          data: matches,
-          error: matchesError,
-        } = await supabase
-          .from("job_matches")
-          .select(
-            "id, job_id, score, created_at"
-          )
-          .eq("profile_id", profileId)
-          .order("score", {
-            ascending: false,
-          })
-          .limit(20);
-
-        if (matchesError) {
-          console.error(
-            "Erreur récupération matching :",
-            matchesError
-          );
-        }
-
-        // =====================================================
-        // 6. OFFRES REMOTE
-        // =====================================================
-
-        const {
-          count: remoteJobsCount,
-          error: remoteJobsError,
-        } = await supabase
-          .from("jobs")
-          .select("id", {
-            count: "exact",
-            head: true,
-          })
-          .eq("remote", true);
-
-        if (remoteJobsError) {
-          console.error(
-            "Erreur offres remote :",
-            remoteJobsError
-          );
-        }
-
-        // =====================================================
-        // 7. SALAIRES
-        // =====================================================
-
-        const {
-          data: salaryJobs,
-          error: salaryError,
-        } = await supabase
-          .from("jobs")
-          .select(
-            "salary_min, salary_max"
-          )
-          .not("salary_min", "is", null)
-          .not("salary_max", "is", null);
-
-        if (salaryError) {
-          console.error(
-            "Erreur salaires :",
-            salaryError
-          );
-        }
-
-        // =====================================================
-        // 8. CALCUL MATCHING
-        // =====================================================
-
-        const matchRows =
-          (matches as MatchRow[] | null) ?? [];
-
-        const scores =
-          matchRows
-            .map((match) =>
-              Number(match.score)
-            )
-            .filter(
-              (score) =>
-                !Number.isNaN(score)
-            );
-
-        let averageMatch = 0;
-        let bestMatch = 0;
-
-        if (scores.length > 0) {
-          averageMatch =
-            scores.reduce(
-              (total, score) =>
-                total + score,
-              0
-            ) / scores.length;
-
-          bestMatch =
-            Math.max(...scores);
-        }
-
-        const recommendedCount =
-          scores.filter(
-            (score) => score >= 70
-          ).length;
-
-        // =====================================================
-        // 9. CANDIDATURES EN ATTENTE
-        // =====================================================
-
-        const applicationRows =
-          (applications as ApplicationRow[] | null) ??
-          [];
-
-        const pendingApplications =
-          applicationRows.filter(
-            (application) => {
-              const status =
-                application.status
-                  ?.toLowerCase()
-                  .trim();
-
-              return (
-                status === "pending" ||
-                status === "en cours" ||
-                status === "submitted" ||
-                status === "sent" ||
-                status === "envoyée" ||
-                status === "envoyee"
-              );
-            }
-          ).length;
-
-        // =====================================================
-        // 10. SALAIRE MOYEN
-        // =====================================================
-
-        const salaries: number[] = [];
-
-        salaryJobs?.forEach((job) => {
-          const min =
-            Number(job.salary_min);
-
-          const max =
-            Number(job.salary_max);
-
-          if (
-            !Number.isNaN(min) &&
-            !Number.isNaN(max)
-          ) {
-            salaries.push(
-              (min + max) / 2
-            );
-          }
-        });
-
-        let averageSalary = "—";
-
-        if (salaries.length > 0) {
-          const average =
-            salaries.reduce(
-              (total, salary) =>
-                total + salary,
-              0
-            ) / salaries.length;
-
-          averageSalary =
-            `${Math.round(
-              average
-            ).toLocaleString("fr-FR")} €`;
-        }
-
-        // =====================================================
-        // 11. PROFIL
-        // =====================================================
-
-        const profileFields = [
-          profile?.name,
-          profile?.email,
-          profile?.phone,
-          profile?.country,
-          profile?.city,
-          profile?.address,
-          profile?.date_of_birth,
-          profile?.skills,
-        ];
-
-        const completedFields =
-          profileFields.filter(
-            (value) =>
-              value !== null &&
-              value !== undefined &&
-              String(value).trim() !== ""
-          ).length;
-
-        const profileCompletion =
-          Math.round(
-            (completedFields /
-              profileFields.length) *
-              100
-          );
-
-        // =====================================================
-        // 12. RÉCUPÉRER LES JOBS DES MATCHES
-        // =====================================================
-
-        const matchJobIds =
-          matchRows
-            .map(
-              (match) =>
-                match.job_id
-            )
-            .filter(
-              (
-                id
-              ): id is string =>
-                Boolean(id)
-            );
-
-        const uniqueMatchJobIds =
-          [...new Set(matchJobIds)];
-
-        let matchedJobs: JobRow[] = [];
-
-        if (
-          uniqueMatchJobIds.length > 0
-        ) {
-          const {
-            data: jobsData,
-            error: matchedJobsError,
-          } = await supabase
-            .from("jobs")
-            .select(
-              `
-                id,
-                title,
-                location,
-                remote,
-                salary_min,
-                salary_max,
-                currency
-              `
-            )
-            .in(
-              "id",
-              uniqueMatchJobIds
-            );
-
-          if (matchedJobsError) {
-            console.error(
-              "Erreur offres matching :",
-              matchedJobsError
-            );
-          }
-
-          matchedJobs =
-            (jobsData as JobRow[] | null) ??
-            [];
-        }
-
-        // =====================================================
-        // 13. CONSTRUIRE OFFRES RECOMMANDÉES
-        // =====================================================
-
-        const jobsById =
-          new Map<string, JobRow>();
-
-        matchedJobs.forEach((job) => {
-          jobsById.set(job.id, job);
-        });
-
-        const recommendationList: RecommendedJob[] =
-          matchRows
-            .filter(
-              (match) =>
-                match.job_id &&
-                Number(match.score) >= 70
-            )
-            .slice(0, 5)
-            .map((match) => {
-              const job =
-                match.job_id
-                  ? jobsById.get(
-                      match.job_id
-                    )
-                  : undefined;
-
-              if (!job) {
-                return null;
-              }
-
-              return {
-                id: job.id,
-                title:
-                  job.title ||
-                  "Offre sans titre",
-                location:
-                  job.location ||
-                  "Localisation non précisée",
-                remote:
-                  Boolean(job.remote),
-                score:
-                  Number(match.score) || 0,
-                salary:
-                  formatSalary(
-                    job.salary_min,
-                    job.salary_max,
-                    job.currency
-                  ),
-              };
-            })
-            .filter(
-              (
-                job
-              ): job is RecommendedJob =>
-                job !== null
-            );
-
-        setRecommendedJobs(
-          recommendationList
-        );
-
-        // =====================================================
-        // 14. ACTIVITÉ RÉCENTE
-        // =====================================================
-
-        const activityItems: ActivityItem[] =
-          [];
-
-        // Candidatures
-        const applicationJobIds =
-          applicationRows
-            .map(
-              (application) =>
-                application.job_id
-            )
-            .filter(
-              (
-                id
-              ): id is string =>
-                Boolean(id)
-            );
-
-        const uniqueApplicationJobIds =
-          [
-            ...new Set(
-              applicationJobIds
-            ),
-          ];
-
-        let applicationJobs: JobRow[] =
-          [];
-
-        if (
-          uniqueApplicationJobIds.length >
-          0
-        ) {
-          const {
-            data: applicationJobsData,
-            error: applicationJobsError,
-          } = await supabase
-            .from("jobs")
-            .select(
-              `
-                id,
-                title,
-                location,
-                remote,
-                salary_min,
-                salary_max,
-                currency
-              `
-            )
-            .in(
-              "id",
-              uniqueApplicationJobIds
-            );
-
-          if (applicationJobsError) {
-            console.error(
-              "Erreur offres candidatures :",
-              applicationJobsError
-            );
-          }
-
-          applicationJobs =
-            (applicationJobsData as JobRow[] | null) ??
-            [];
-        }
-
-        const applicationJobsById =
-          new Map<string, JobRow>();
-
-        applicationJobs.forEach((job) => {
-          applicationJobsById.set(
-            job.id,
-            job
-          );
-        });
-
-        applicationRows
-          .slice(0, 5)
-          .forEach((application) => {
-            const job =
-              application.job_id
-                ? applicationJobsById.get(
-                    application.job_id
-                  )
-                : undefined;
-
-            const date =
-              application.applied_at ||
-              application.created_at;
-
-            activityItems.push({
-              id: `application-${application.id}`,
-              type: "application",
-              title:
-                "Candidature envoyée",
-              description:
-                job?.title
-                  ? `Vous avez candidaté à « ${job.title} ».`
-                  : "Une nouvelle candidature a été enregistrée.",
-              date,
-              status:
-                applicationStatusLabel(
-                  application.status
-                ),
-            });
-          });
-
-        // Matching
-        matchRows
-          .slice(0, 5)
-          .forEach((match) => {
-            const job =
-              match.job_id
-                ? jobsById.get(
-                    match.job_id
-                  )
-                : undefined;
-
-            activityItems.push({
-              id: `match-${match.id}`,
-              type: "match",
-              title:
-                "Nouveau matching IA",
-              description:
-                job?.title
-                  ? `Votre profil correspond à « ${job.title} » à ${Math.round(
-                      Number(match.score) || 0
-                    )}%.`
-                  : `Une nouvelle offre correspond à ${Math.round(
-                      Number(match.score) || 0
-                    )}% à votre profil.`,
-              date: match.created_at,
-              status: "Analyse IA",
-            });
-          });
-
-        activityItems.sort(
-          (a, b) =>
-            new Date(b.date).getTime() -
-            new Date(a.date).getTime()
-        );
-
-        setActivities(
-          activityItems.slice(0, 8)
-        );
-
-        // =====================================================
-        // 15. METTRE À JOUR LES KPI
-        // =====================================================
-
-        setStats({
-          profileCompletion:
-            `${profileCompletion}%`,
-
-          totalJobs:
-            String(jobsCount ?? 0),
-
-          totalApplications:
-            String(
-              applicationsCount ?? 0
-            ),
-
-          averageMatch:
-            `${Math.round(
-              averageMatch
-            )}%`,
-
-          bestMatch:
-            `${Math.round(
-              bestMatch
-            )}%`,
-
-          recommendedJobs:
-            String(
-              recommendedCount
-            ),
-
-          pendingApplications:
-            String(
-              pendingApplications
-            ),
-
-          remoteJobs:
-            String(
-              remoteJobsCount ?? 0
-            ),
-
-          averageSalary,
-        });
-      } catch (error) {
-        console.error(
-          "Erreur Dashboard :",
-          error
-        );
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    loadDashboard();
-  }, []);
-
   return (
-    <div className="space-y-8">
-      <PageHeader
-        title={`Bonjour, ${name} 👋`}
-        subtitle="Voici votre tableau de bord IA."
-      />
+    <div className="page-container">
 
-      {/* =====================================================
-          KPI 3 × 3
-      ===================================================== */}
+      {/* HEADER */}
+      <section className="mb-8 animate-fade-up">
 
-      <KpiGrid
-        stats={stats}
-        loading={loading}
-      />
+        <div className="flex flex-col justify-between gap-6 md:flex-row md:items-end">
 
-      {/* =====================================================
-          OFFRES + ACTIVITÉ
-      ===================================================== */}
+          <div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <RecommendedJobs
-          jobs={recommendedJobs}
-          loading={loading}
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-green-200 bg-green-50 px-3 py-1.5">
+
+              <span className="relative flex h-2 w-2">
+                <span className="absolute h-full w-full animate-ping rounded-full bg-green-400 opacity-60" />
+                <span className="relative h-2 w-2 rounded-full bg-green-600" />
+              </span>
+
+              <span className="text-[10px] font-extrabold uppercase tracking-[0.13em] text-green-700">
+                Votre espace carrière
+              </span>
+
+            </div>
+
+            <h1 className="text-3xl font-extrabold tracking-tight text-slate-950 md:text-4xl">
+              Bonjour 👋
+            </h1>
+
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
+              Retrouvez vos opportunités, candidatures et recommandations
+              intelligentes au même endroit.
+            </p>
+
+          </div>
+
+          <Link
+            href="/analysis"
+            className="green-button"
+          >
+            <Sparkles className="h-4 w-4" />
+            Analyser mon profil
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+
+        </div>
+
+      </section>
+
+
+      {/* KPI */}
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+
+        <Metric
+          href="/matches"
+          icon={Target}
+          label="Correspondances"
+          value="—"
+          description="Offres compatibles"
         />
 
-        <RecentActivity
-          activities={activities}
-          loading={loading}
+        <Metric
+          href="/applications"
+          icon={BriefcaseBusiness}
+          label="Candidatures"
+          value="—"
+          description="En cours"
         />
-      </div>
+
+        <Metric
+          href="/resume"
+          icon={FileText}
+          label="Documents"
+          value="—"
+          description="CV disponibles"
+        />
+
+        <Metric
+          href="/interviews"
+          icon={CalendarDays}
+          label="Entretiens"
+          value="—"
+          description="À venir"
+        />
+
+      </section>
+
+
+      {/* MAIN */}
+      <section className="mt-6 grid gap-6 xl:grid-cols-[1fr_380px]">
+
+        {/* MATCHING */}
+        <div className="premium-card p-6 animate-fade-up">
+
+          <div className="mb-6 flex items-center justify-between">
+
+            <div className="flex items-center gap-3">
+
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-green-50">
+                <Target className="h-5 w-5 text-green-600" />
+              </div>
+
+              <div>
+
+                <h2 className="text-sm font-extrabold text-slate-900">
+                  Mes correspondances
+                </h2>
+
+                <p className="mt-0.5 text-xs text-slate-400">
+                  Les offres correspondant à votre profil
+                </p>
+
+              </div>
+
+            </div>
+
+            <Link
+              href="/matches"
+              className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold text-green-600 transition hover:bg-green-50"
+            >
+              Voir tout
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+
+          </div>
+
+
+          <div className="relative overflow-hidden rounded-2xl border border-green-100 bg-gradient-to-br from-green-50 via-white to-green-50 p-12 text-center">
+
+            <div className="absolute -right-16 -top-16 h-40 w-40 rounded-full bg-green-300/20 blur-3xl" />
+
+            <div className="relative">
+
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-white shadow-lg shadow-green-200/40">
+
+                <Target className="h-7 w-7 text-green-500" />
+
+              </div>
+
+              <h3 className="mt-5 text-sm font-extrabold text-slate-800">
+                Votre moteur de matching est prêt
+              </h3>
+
+              <p className="mx-auto mt-2 max-w-md text-xs leading-5 text-slate-500">
+                L'IA compare vos compétences avec les offres disponibles
+                pour identifier les opportunités les plus pertinentes.
+              </p>
+
+              <Link
+                href="/matches"
+                className="mt-5 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-xs font-bold text-green-700 shadow-sm ring-1 ring-green-100 transition hover:-translate-y-0.5 hover:shadow-md"
+              >
+                Voir mes correspondances
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+
+            </div>
+
+          </div>
+
+        </div>
+
+
+        {/* AI COPILOT */}
+        <div className="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-[#2e1065] via-[#4c1d95] to-[#4338ca] p-7 text-white shadow-xl shadow-green-900/15 animate-fade-up">
+
+          <div className="absolute -right-16 -top-16 h-48 w-48 rounded-full bg-green-400/20 blur-3xl" />
+
+          <div className="absolute -bottom-20 -left-20 h-48 w-48 rounded-full bg-green-400/20 blur-3xl" />
+
+          <div className="relative">
+
+            <div className="flex items-center justify-between">
+
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/10 ring-1 ring-white/10">
+
+                <Sparkles className="h-5 w-5 text-green-200" />
+
+              </div>
+
+              <span className="rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[9px] font-bold tracking-wider text-green-100">
+                AI POWERED
+              </span>
+
+            </div>
+
+            <p className="mt-7 text-[10px] font-bold uppercase tracking-[0.18em] text-green-300">
+              Career Copilot
+            </p>
+
+            <h2 className="mt-3 text-2xl font-extrabold leading-tight">
+              Votre recherche d'emploi,
+              <br />
+              assistée par l'IA.
+            </h2>
+
+            <p className="mt-4 text-xs leading-6 text-green-100/70">
+              Analyse de profil, matching intelligent, optimisation du CV
+              et préparation aux entretiens.
+            </p>
+
+            <Link
+              href="/analysis"
+              className="mt-7 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-3 text-xs font-extrabold text-green-900 shadow-lg transition hover:-translate-y-0.5 hover:bg-green-50"
+            >
+              <Zap className="h-4 w-4" />
+              Utiliser l'IA
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+
+          </div>
+
+        </div>
+
+      </section>
+
+
+      {/* QUICK ACTIONS */}
+      <section className="mt-6 grid gap-4 md:grid-cols-3">
+
+        <QuickAction
+          href="/jobs"
+          icon={TrendingUp}
+          title="Explorer les offres"
+          description="Découvrez les nouvelles opportunités."
+        />
+
+        <QuickAction
+          href="/resume"
+          icon={FileText}
+          title="Optimiser mon CV"
+          description="Améliorez votre CV avec l'IA."
+        />
+
+        <QuickAction
+          href="/tracking"
+          icon={BriefcaseBusiness}
+          title="Suivre mes candidatures"
+          description="Visualisez votre progression."
+        />
+
+      </section>
+
     </div>
+  );
+}
+
+
+function Metric({
+  href,
+  icon: Icon,
+  label,
+  value,
+  description,
+}: {
+  href: string;
+  icon: React.ElementType;
+  label: string;
+  value: string;
+  description: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="premium-card group p-5 animate-fade-up"
+    >
+
+      <div className="flex items-start justify-between">
+
+        <div>
+
+          <p className="text-[11px] font-bold text-slate-500">
+            {label}
+          </p>
+
+          <p className="mt-3 text-3xl font-extrabold tracking-tight text-slate-950">
+            {value}
+          </p>
+
+          <p className="mt-1 text-[10px] text-slate-400">
+            {description}
+          </p>
+
+        </div>
+
+        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-green-50 transition duration-300 group-hover:scale-110 group-hover:bg-green-100">
+
+          <Icon className="h-5 w-5 text-green-600" />
+
+        </div>
+
+      </div>
+
+    </Link>
+  );
+}
+
+
+function QuickAction({
+  href,
+  icon: Icon,
+  title,
+  description,
+}: {
+  href: string;
+  icon: React.ElementType;
+  title: string;
+  description: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="premium-card group flex items-center gap-4 p-5"
+    >
+
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-green-50 transition duration-300 group-hover:scale-110 group-hover:bg-green-100">
+
+        <Icon className="h-5 w-5 text-green-600" />
+
+      </div>
+
+      <div className="min-w-0">
+
+        <h3 className="text-sm font-extrabold text-slate-800">
+          {title}
+        </h3>
+
+        <p className="mt-1 text-[11px] leading-5 text-slate-500">
+          {description}
+        </p>
+
+      </div>
+
+      <ArrowRight className="ml-auto h-4 w-4 shrink-0 text-slate-300 transition group-hover:translate-x-1 group-hover:text-green-500" />
+
+    </Link>
   );
 }

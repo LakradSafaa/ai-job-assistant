@@ -1,14 +1,16 @@
-import AuthLayout from "@/components/auth/AuthLayout";
-import RegisterHero from "@/components/auth/RegisterHero";
+import "./globals.css";
 
-export default function Layout({
+export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
+}>) {
   return (
-    <AuthLayout hero={<RegisterHero />}>
-      {children}
-    </AuthLayout>
+    <html
+      lang="fr"
+      data-scroll-behavior="smooth"
+    >
+      <body>{children}</body>
+    </html>
   );
 }

@@ -7,7 +7,11 @@ services:
       - "5678:5678"
 
     environment:
-      - TZ=Africa/Casablanca
+      TZ: Africa/Casablanca
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+
+      # Supabase secret key récupérée depuis le fichier .env
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY}
 
     volumes:
       - ./n8n_data:/home/node/.n8n

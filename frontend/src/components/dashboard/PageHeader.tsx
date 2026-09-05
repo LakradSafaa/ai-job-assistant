@@ -1,19 +1,33 @@
+interface PageHeaderProps {
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+}
+
 export default function PageHeader({
   title,
-  subtitle,
-}: {
-  title: string;
-  subtitle: string;
-}) {
+  description,
+  action,
+}: PageHeaderProps) {
   return (
-    <div>
-      <h1 className="text-3xl font-bold text-[#1F2937]">
-        {title}
-      </h1>
+    <div className="mb-8 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+          {title}
+        </h1>
 
-      <p className="mt-2 text-stone-600">
-        {subtitle}
-      </p>
+        {description && (
+          <p className="mt-1.5 max-w-2xl text-sm leading-6 text-slate-500">
+            {description}
+          </p>
+        )}
+      </div>
+
+      {action && (
+        <div className="shrink-0">
+          {action}
+        </div>
+      )}
     </div>
   );
 }

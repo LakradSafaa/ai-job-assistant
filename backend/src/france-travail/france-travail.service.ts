@@ -1,8 +1,10 @@
-import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import axios from 'axios';
 
 @Injectable()
 export class FranceTravailService {
+  private readonly logger = new Logger(FranceTravailService.name);
+
   /**
    * URL OAuth France Travail
    */
@@ -11,17 +13,25 @@ export class FranceTravailService {
 
   /**
    * API Offres d'emploi v2
-   *
-   * Base URL officielle :
-   * https://api.francetravail.io/partenaire/offresdemploi
    */
   private readonly jobsUrl =
     'https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search';
 
   /**
-   * Obtenir un token OAuth 2.0
+   * Cache pour le token OAuth
+   */
+  private cachedToken: string | null = null;
+  private tokenExpiry: number | null = null;
+
+  /**
+   * Obtenir un token OAuth 2.0 avec mise en cache
    */
   async getAccessToken(): Promise<string> {
+    const now = Date.now();
+    if (this.cachedToken && this.tokenExpiry && now < this.tokenExpiry) {
+      return this.cachedToken;
+    }
+
     const clientId = process.env.FRANCE_TRAVAIL_CLIENT_ID;
     const clientSecret = process.env.FRANCE_TRAVAIL_CLIENT_SECRET;
 
@@ -55,7 +65,7 @@ export class FranceTravailService {
         },
       );
 
-      const accessToken = response.data?.access_token;
+      const accessToken: string = response.data?.access_token;
 
       if (!accessToken) {
         throw new Error(
@@ -63,16 +73,17 @@ export class FranceTravailService {
         );
       }
 
-      console.log(
-        '✅ Token France Travail obtenu',
-      );
+      this.cachedToken = accessToken;
+      this.tokenExpiry = now + ((response.data?.expires_in || 1499) - 60) * 1000;
+
+      this.logger.log('✅ Token France Travail obtenu avec succès');
 
       return accessToken;
     } catch (error: any) {
       const errorDetails =
         error.response?.data || error.message;
 
-      console.error(
+      this.logger.error(
         '❌ Erreur OAuth France Travail:',
         errorDetails,
       );
@@ -127,6 +138,15 @@ export class FranceTravailService {
         },
       );
 
+      // Si France Travail renvoie un statut HTTP 204 (Aucun contenu)
+      if (response.status === 204) {
+        return {
+          success: true,
+          count: 0,
+          jobs: [],
+        };
+      }
+
       const resultats =
         response.data?.resultats || [];
 
@@ -136,10 +156,19 @@ export class FranceTravailService {
         jobs: resultats,
       };
     } catch (error: any) {
+      // Gestion spécifique si HTTP 204 est capturé comme exception
+      if (error.response?.status === 204) {
+        return {
+          success: true,
+          count: 0,
+          jobs: [],
+        };
+      }
+
       const errorDetails =
         error.response?.data || error.message;
 
-      console.error(
+      this.logger.error(
         '❌ Erreur API Offres France Travail:',
         errorDetails,
       );

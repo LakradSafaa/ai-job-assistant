@@ -1,223 +1,235 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 
-export async function POST(
-  request: Request
-) {
+export async function POST(request: Request) {
   try {
-    /*
-     * ==========================================
-     * 1. RÉCUPÉRER LA REQUÊTE
-     * ==========================================
-     */
-
     const body = await request.json();
 
-    const jobMatchId =
-      body?.job_match_id;
+    const jobId = body?.job_id;
 
-    if (
-      jobMatchId === undefined ||
-      jobMatchId === null ||
-      jobMatchId === ""
-    ) {
+    if (!jobId) {
       return NextResponse.json(
         {
-          error:
-            "Le champ job_match_id est requis.",
+          success: false,
+          error: "job_id est obligatoire.",
         },
         { status: 400 }
       );
     }
 
-    /*
-     * ==========================================
-     * 2. SUPABASE SERVER
-     * ==========================================
-     */
+    const cookieStore = await cookies();
 
-    const supabase =
-      await createClient();
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll();
+          },
 
-    /*
-     * ==========================================
-     * 3. UTILISATEUR CONNECTÉ
-     * ==========================================
-     */
+          setAll(cookiesToSet) {
+            try {
+              cookiesToSet.forEach(
+                ({ name, value, options }) => {
+                  cookieStore.set(
+                    name,
+                    value,
+                    options
+                  );
+                }
+              );
+            } catch {
+              // Ignore cookie errors from Server Components.
+            }
+          },
+        },
+      }
+    );
 
     const {
-      data: { user },
-      error: userError,
-    } =
-      await supabase.auth.getUser();
+      data: {
+        user,
+      },
+      error: authError,
+    } = await supabase.auth.getUser();
 
-    if (userError) {
-      console.error(
-        "Erreur auth Supabase :",
-        userError
-      );
-    }
-
-    if (!user) {
+    if (authError || !user) {
       return NextResponse.json(
         {
-          error:
-            "Utilisateur non authentifié.",
+          success: false,
+          error: "Utilisateur non authentifié.",
         },
         { status: 401 }
       );
     }
 
     /*
-     * ==========================================
-     * 4. VÉRIFIER QUE LE MATCH APPARTIENT
-     *    À L'UTILISATEUR
-     * ==========================================
+     * ---------------------------------------------------------
+     * JOB
+     * ---------------------------------------------------------
      */
 
     const {
-      data: match,
-      error: matchError,
+      data: job,
+      error: jobError,
     } = await supabase
-      .from("job_matches")
-      .select(
-        `
-          id,
-          job_id,
-          profile_id,
-          score
-        `
-      )
-      .eq("id", Number(jobMatchId))
-      .eq("profile_id", user.id)
-      .maybeSingle();
+      .from("jobs")
+      .select("*")
+      .eq("id", jobId)
+      .single();
 
-    if (matchError) {
-      console.error(
-        "Erreur vérification job_match :",
-        matchError
-      );
-
+    if (jobError || !job) {
       return NextResponse.json(
         {
-          error:
-            "Impossible de vérifier la correspondance.",
-          details:
-            matchError.message,
+          success: false,
+          error: "Offre introuvable.",
+          details: jobError?.message,
         },
-        { status: 500 }
-      );
-    }
-
-    if (!match) {
-      return NextResponse.json(
-        {
-          error:
-            "Cette correspondance n'appartient pas à votre profil.",
-        },
-        { status: 403 }
+        { status: 404 }
       );
     }
 
     /*
-     * ==========================================
-     * 5. URL N8N
-     * ==========================================
+     * ---------------------------------------------------------
+     * PROFILE
+     * ---------------------------------------------------------
      */
 
-    const n8nWebhookUrl =
-      process.env
-        .N8N_PREPARE_APP_WEBHOOK_URL;
+    const {
+      data: profile,
+      error: profileError,
+    } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", user.id)
+      .single();
 
-    if (!n8nWebhookUrl) {
+    if (profileError || !profile) {
       return NextResponse.json(
         {
-          error:
-            "N8N_PREPARE_APP_WEBHOOK_URL n'est pas configuré dans .env.local",
+          success: false,
+          error: "Profil utilisateur introuvable.",
         },
-        { status: 500 }
+        { status: 404 }
       );
     }
 
     /*
-     * ==========================================
-     * 6. APPEL N8N
-     * ==========================================
+     * ---------------------------------------------------------
+     * N8N
+     * ---------------------------------------------------------
      */
+
+    const webhookUrl =
+      process.env.N8N_APPLICATION_WEBHOOK_URL;
+
+    if (!webhookUrl) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "N8N_APPLICATION_WEBHOOK_URL n'est pas configurée.",
+        },
+        { status: 500 }
+      );
+    }
 
     const n8nResponse = await fetch(
-      n8nWebhookUrl,
+      webhookUrl,
       {
         method: "POST",
 
         headers: {
-          "Content-Type":
-            "application/json",
+          "Content-Type": "application/json",
         },
 
         body: JSON.stringify({
-          job_match_id: match.id,
-          job_id: match.job_id,
-          user_id: user.id,
-          profile_id: match.profile_id,
-          score: match.score,
+          event: "prepare_application",
+
+          profile_id: user.id,
+
+          job_id: job.id,
+
+          user: {
+            id: user.id,
+            email: user.email,
+          },
+
+          profile,
+
+          job,
         }),
 
         cache: "no-store",
       }
     );
 
-    const n8nText =
+    const rawResponse =
       await n8nResponse.text();
 
-    if (!n8nResponse.ok) {
-      console.error(
-        "Erreur n8n :",
-        n8nResponse.status,
-        n8nText
-      );
+    let n8nData: any = null;
 
+    try {
+      n8nData = rawResponse
+        ? JSON.parse(rawResponse)
+        : null;
+    } catch {
+      n8nData = {
+        raw: rawResponse,
+      };
+    }
+
+    if (!n8nResponse.ok) {
       return NextResponse.json(
         {
+          success: false,
+
           error:
-            "Le workflow n8n n'a pas pu être lancé.",
-          status:
-            n8nResponse.status,
-          details: n8nText,
+            n8nData?.error ||
+            n8nData?.message ||
+            `Erreur n8n HTTP ${n8nResponse.status}`,
+
+          details: n8nData,
         },
-        { status: 502 }
+        {
+          status: 502,
+        }
       );
     }
 
-    /*
-     * ==========================================
-     * 7. SUCCÈS
-     * ==========================================
-     */
-
     return NextResponse.json({
       success: true,
+
       message:
-        "Préparation de candidature lancée.",
-      job_match_id: match.id,
-      job_id: match.job_id,
-      user_id: user.id,
-      n8n_response: n8nText,
+        "La préparation de votre candidature a été lancée.",
+
+      job_id: job.id,
+
+      application:
+        n8nData?.application ||
+        n8nData ||
+        null,
     });
-  } catch (error: unknown) {
+  } catch (error) {
     console.error(
-      "Erreur API prepare application :",
+      "APPLICATION PREPARE ERROR:",
       error
     );
 
     return NextResponse.json(
       {
+        success: false,
+
         error:
           error instanceof Error
             ? error.message
-            : "Erreur interne du serveur.",
+            : "Erreur interne.",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }

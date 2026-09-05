@@ -1,24 +1,24 @@
 import Link from "next/link";
-import { BrainCircuit } from "lucide-react";
+import { Sparkles } from "lucide-react";
 
 export default function SidebarLogo() {
   return (
     <Link
       href="/dashboard"
-      className="flex items-center gap-3 px-2"
+      className="group flex items-center gap-3"
     >
-      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#1F6F5F] text-white shadow-lg">
-        <BrainCircuit size={22} />
+      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-600/20 transition duration-300 group-hover:scale-105">
+        <Sparkles className="h-5 w-5" />
       </div>
 
-      <div>
-        <h1 className="text-lg font-bold text-white">
+      <div className="min-w-0">
+        <div className="text-sm font-bold tracking-tight text-slate-900">
           AI Job Assistant
-        </h1>
+        </div>
 
-        <p className="text-xs text-gray-400">
-          Smart Career Platform
-        </p>
+        <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-600">
+          Copilote carrière
+        </div>
       </div>
     </Link>
   );

@@ -1,29 +1,25 @@
-interface Props {
+import React from "react";
+
+interface AuthLayoutProps {
   children: React.ReactNode;
-  hero: React.ReactNode;
+  hero?: React.ReactNode;
 }
 
 export default function AuthLayout({
   children,
   hero,
-}: Props) {
+}: AuthLayoutProps) {
   return (
-    <div className="grid min-h-screen lg:grid-cols-2">
-
-      <div className="hidden lg:block">
-        {hero}
+    <div className="min-h-screen grid grid-cols-1 lg:grid-cols-2">
+      <div className="flex flex-col justify-center px-6 py-12 lg:px-8">
+        {children}
       </div>
 
-      <div className="flex items-center justify-center bg-white p-8">
-
-        <div className="w-full max-w-md">
-
-          {children}
-
+      {hero && (
+        <div className="relative hidden min-h-screen w-full lg:block">
+          {hero}
         </div>
-
-      </div>
-
+      )}
     </div>
   );
 }

@@ -16,7 +16,15 @@ export class FranceTravailController {
   }
 
   @Get('jobs')
-  async testFetchJobs(@Query('motsCles') motsCles?: string) {
-    return this.franceTravailService.searchJobs({ motsCles });
+  async testFetchJobs(
+    @Query('motsCles') motsCles?: string,
+    @Query('commune') commune?: string,
+    @Query('range') range?: string,
+  ) {
+    return this.franceTravailService.searchJobs({
+      motsCles,
+      commune,
+      range: range || '0-49',
+    });
   }
 }

@@ -1,10 +1,15 @@
 "use client";
 
-import {
-  CalendarDays,
-  ExternalLink,
-  FileText,
-  MapPin,
+import React from "react";
+import { 
+  Building2, 
+  Calendar, 
+  CheckCircle2, 
+  Clock, 
+  XCircle, 
+  MessageSquare, 
+  Send,
+  FileText 
 } from "lucide-react";
 
 export interface Application {
@@ -13,16 +18,14 @@ export interface Application {
   cv_url: string | null;
   cover_letter: string | null;
   applied_at: string | null;
-
-  job: {
+  job?: {
     id: string;
     title: string;
     location: string | null;
     contract_type: string | null;
     remote: boolean | null;
   } | null;
-
-  company: {
+  company?: {
     id: string;
     name: string | null;
     city: string | null;
@@ -35,212 +38,142 @@ interface ApplicationCardProps {
   application: Application;
 }
 
-function getStatusStyle(status: string | null) {
-  const normalized = (
-    status ?? "En attente"
-  ).toLowerCase();
+const STAGES = [
+  { key: "préparée", label: "Préparée", icon: FileText },
+  { key: "confirmée", label: "Confirmée", icon: CheckCircle2 },
+  { key: "soumise", label: "Soumise", icon: Send },
+  { key: "entretien", label: "Entretien", icon: MessageSquare },
+  { key: "acceptée", label: "Acceptée", icon: CheckCircle2 },
+  { key: "refusée", label: "Refusée", icon: XCircle },
+];
 
-  if (
-    normalized.includes("accept") ||
-    normalized.includes("accepted")
-  ) {
-    return {
-      label: "Acceptée",
-      className:
-        "bg-green-50 text-green-700 border-green-200",
-    };
+function getStatusBadge(status: string | null) {
+  const norm = (status ?? "en attente").toLowerCase();
+
+  if (norm.includes("accept")) {
+    return "bg-emerald-50 text-emerald-700 border-emerald-200/80";
   }
-
-  if (
-    normalized.includes("refus") ||
-    normalized.includes("reject")
-  ) {
-    return {
-      label: "Refusée",
-      className:
-        "bg-red-50 text-red-700 border-red-200",
-    };
+  if (norm.includes("refus") || norm.includes("reject")) {
+    return "bg-rose-50 text-rose-700 border-rose-200/80";
   }
-
-  if (
-    normalized.includes("entretien") ||
-    normalized.includes("interview")
-  ) {
-    return {
-      label: "Entretien",
-      className:
-        "bg-blue-50 text-blue-700 border-blue-200",
-    };
+  if (norm.includes("entretien") || norm.includes("interview")) {
+    return "bg-sky-50 text-sky-700 border-sky-200/80";
   }
-
-  return {
-    label: "En attente",
-    className:
-      "bg-amber-50 text-amber-700 border-amber-200",
-  };
+  return "bg-amber-50 text-amber-700 border-amber-200/80";
 }
 
-function formatDate(date: string | null) {
-  if (!date) {
-    return "Date inconnue";
-  }
-
-  const parsedDate = new Date(date);
-
-  if (Number.isNaN(parsedDate.getTime())) {
-    return "Date inconnue";
-  }
-
+function formatDate(dateStr: string | null) {
+  if (!dateStr) return "N/A";
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return "N/A";
   return new Intl.DateTimeFormat("fr-FR", {
-    day: "numeric",
-    month: "long",
+    day: "2-digit",
+    month: "short",
     year: "numeric",
-  }).format(parsedDate);
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }
 
-export default function ApplicationCard({
-  application,
-}: ApplicationCardProps) {
-  const status = getStatusStyle(
-    application.status
-  );
-
-  const job = application.job;
-  const company = application.company;
+export default function ApplicationCard({ application }: ApplicationCardProps) {
+  const { status, applied_at, job, company } = application;
+  const statusClass = getStatusBadge(status);
+  
+  // Index d'étape actif (0 par défaut)
+  const currentStageIndex = 0; 
 
   return (
-    <article className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm transition hover:shadow-md">
-      {/* HEADER */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex min-w-0 items-start gap-4">
-          {/* COMPANY LOGO */}
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-[#1F6F5F]/10 text-sm font-bold text-[#1F6F5F]">
+    <article className="group relative overflow-hidden rounded-2xl border border-stone-200/90 bg-white p-6 shadow-sm transition-all duration-300 hover:border-[#1F6F5F]/40 hover:shadow-xl hover:shadow-[#1F6F5F]/5">
+      {/* HEADER CARD */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-4">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#1F6F5F]/10 font-bold text-[#1F6F5F] ring-1 ring-[#1F6F5F]/20">
             {company?.logo_url ? (
               <img
                 src={company.logo_url}
-                alt={
-                  company.name ??
-                  "Entreprise"
-                }
+                alt={company.name ?? "Entreprise"}
                 className="h-full w-full object-cover"
               />
             ) : (
-              (
-                company?.name ??
-                "E"
-              )
-                .charAt(0)
-                .toUpperCase()
+              <Building2 className="h-5 w-5 text-[#1F6F5F]" />
             )}
           </div>
 
-          {/* JOB */}
-          <div className="min-w-0">
-            <h2 className="truncate text-lg font-bold text-[#1F2937]">
-              {job?.title ??
-                "Offre supprimée"}
-            </h2>
-
-            <p className="mt-1 text-sm font-medium text-stone-500">
-              {company?.name ??
-                "Entreprise inconnue"}
+          <div>
+            <h3 className="text-base font-bold text-stone-900 transition-colors group-hover:text-[#1F6F5F]">
+              {job?.title ?? "Candidature"}
+            </h3>
+            <p className="text-sm font-medium text-stone-500">
+              {company?.name ?? "Entreprise non renseignée"}
             </p>
-
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm text-stone-400">
-              {job?.location && (
-                <span className="flex items-center gap-1.5">
-                  <MapPin size={14} />
-                  {job.location}
-                </span>
-              )}
-
-              {job?.remote && (
-                <span className="text-[#1F6F5F]">
-                  Télétravail
-                </span>
-              )}
-            </div>
           </div>
         </div>
 
-        {/* STATUS */}
-        <span
-          className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold ${status.className}`}
-        >
-          {status.label}
-        </span>
-      </div>
-
-      {/* INFORMATIONS */}
-      <div className="mt-6 grid gap-3 sm:grid-cols-2">
-        <div className="rounded-2xl bg-stone-50 p-4">
-          <div className="flex items-center gap-2 text-xs font-medium text-stone-400">
-            <CalendarDays size={15} />
-            Candidature envoyée
-          </div>
-
-          <p className="mt-2 text-sm font-semibold text-[#1F2937]">
-            {formatDate(
-              application.applied_at
-            )}
-          </p>
-        </div>
-
-        <div className="rounded-2xl bg-stone-50 p-4">
-          <div className="flex items-center gap-2 text-xs font-medium text-stone-400">
-            <FileText size={15} />
-            CV utilisé
-          </div>
-
-          <p className="mt-2 truncate text-sm font-semibold text-[#1F2937]">
-            {application.cv_url
-              ? "CV sélectionné"
-              : "Aucun CV enregistré"}
-          </p>
+        <div className="flex items-center gap-3">
+          <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold capitalize tracking-wide ${statusClass}`}>
+            <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
+            {status ?? "En attente"}
+          </span>
         </div>
       </div>
 
-      {/* COVER LETTER */}
-      {application.cover_letter && (
-        <div className="mt-5 rounded-2xl border border-stone-100 bg-stone-50 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-stone-400">
-            Lettre de motivation
-          </p>
+      {/* TIMELINE / PROGRESS STEPPER */}
+      <div className="mt-8 border-t border-stone-100 pt-6">
+        <div className="relative flex items-center justify-between">
+          {/* Ligne de fond */}
+          <div className="absolute left-0 top-1/2 h-0.5 w-full -translate-y-1/2 bg-stone-100" />
+          
+          {/* Ligne de progression dynamique */}
+          <div 
+            className="absolute left-0 top-1/2 h-0.5 -translate-y-1/2 bg-[#1F6F5F] transition-all duration-500" 
+            style={{ width: `${(currentStageIndex / (STAGES.length - 1)) * 100}%` }}
+          />
 
-          <p className="mt-2 line-clamp-3 text-sm leading-6 text-stone-600">
-            {application.cover_letter}
-          </p>
+          {STAGES.map((stage, idx) => {
+            const isCompleted = idx <= currentStageIndex;
+            const isCurrent = idx === currentStageIndex;
+
+            return (
+              <div key={stage.key} className="relative z-10 flex flex-col items-center">
+                <div
+                  className={`flex h-7 w-7 items-center justify-center rounded-full border-2 text-xs font-semibold transition-all duration-300 ${
+                    isCurrent
+                      ? "border-[#1F6F5F] bg-[#1F6F5F] text-white ring-4 ring-[#1F6F5F]/15 shadow-sm scale-105"
+                      : isCompleted
+                      ? "border-[#1F6F5F] bg-[#1F6F5F] text-white"
+                      : "border-stone-200 bg-white text-stone-400"
+                  }`}
+                >
+                  {isCompleted && !isCurrent ? (
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                  ) : (
+                    <span>{idx + 1}</span>
+                  )}
+                </div>
+
+                <span
+                  className={`mt-2 text-[11px] font-medium transition-colors ${
+                    isCurrent
+                      ? "font-semibold text-[#1F6F5F]"
+                      : isCompleted
+                      ? "text-stone-700"
+                      : "text-stone-400"
+                  }`}
+                >
+                  {stage.label}
+                </span>
+              </div>
+            );
+          })}
         </div>
-      )}
+      </div>
 
-      {/* FOOTER */}
-      <div className="mt-5 flex items-center justify-between border-t border-stone-100 pt-5">
-        <div className="flex flex-wrap gap-2">
-          {job?.contract_type && (
-            <span className="rounded-lg bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-500">
-              {job.contract_type}
-            </span>
-          )}
-
-          {company?.city && (
-            <span className="rounded-lg bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-500">
-              {company.city}
-            </span>
-          )}
+      {/* FOOTER METADATA */}
+      <div className="mt-6 flex items-center justify-between border-t border-stone-100/80 pt-4 text-xs font-medium text-stone-400">
+        <div className="flex items-center gap-1.5">
+          <Clock className="h-3.5 w-3.5 text-stone-400" />
+          <span>Créé le : {formatDate(applied_at)}</span>
         </div>
-
-        {application.cv_url && (
-          <a
-            href={application.cv_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 rounded-xl border border-stone-200 px-4 py-2.5 text-sm font-semibold text-stone-600 transition hover:bg-stone-50 hover:text-[#1F6F5F]"
-          >
-            <FileText size={16} />
-            Voir le CV
-            <ExternalLink size={14} />
-          </a>
-        )}
       </div>
     </article>
   );

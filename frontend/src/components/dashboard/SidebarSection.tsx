@@ -8,13 +8,13 @@ export default function SidebarSection({
   children,
 }: SidebarSectionProps) {
   return (
-    <section className="space-y-3">
+    <section className="mb-7">
 
-      <h3 className="px-4 text-xs font-semibold uppercase tracking-widest text-gray-500">
+      <div className="mb-2 px-3 text-[9px] font-bold uppercase tracking-[0.16em] text-emerald-600/70">
         {title}
-      </h3>
+      </div>
 
-      <div className="space-y-2">
+      <div className="space-y-1">
         {children}
       </div>
 

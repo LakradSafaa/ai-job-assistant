@@ -19,11 +19,8 @@ export function ApplyModal({
   companyName,
   onSuccess,
 }: ApplyModalProps) {
-  const [loading, setLoading] =
-    useState(false);
-
-  const [error, setError] =
-    useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) {
     return null;
@@ -35,71 +32,121 @@ export function ApplyModal({
       setError(null);
 
       console.log(
-        "Préparation candidature :",
-        {
-          job_match_id: jobMatchId,
-        }
+        "================================="
       );
+      console.log(
+        "APPLICATION PREPARE"
+      );
+      console.log(
+        "job_match_id:",
+        jobMatchId
+      );
+      console.log(
+        "================================="
+      );
+
+      if (!jobMatchId) {
+        throw new Error(
+          "job_match_id manquant."
+        );
+      }
 
       const response = await fetch(
         "/api/applications/prepare",
         {
           method: "POST",
+
           headers: {
-            "Content-Type":
-              "application/json",
+            "Content-Type": "application/json",
           },
+
           body: JSON.stringify({
             job_match_id: jobMatchId,
           }),
         }
       );
 
-      let data: {
-        success?: boolean;
-        message?: string;
-        error?: string;
-      } = {};
+      const text =
+        await response.text();
+
+      console.log(
+        "STATUS API:",
+        response.status
+      );
+
+      console.log(
+        "RAW RESPONSE:",
+        text
+      );
+
+      let data: any = {};
 
       try {
-        data = await response.json();
+        data = text
+          ? JSON.parse(text)
+          : {};
       } catch {
-        data = {};
-      }
-
-      if (!response.ok) {
-        throw new Error(
-          data.error ||
-            `Erreur serveur (${response.status})`
-        );
-      }
-
-      if (data.success === false) {
-        throw new Error(
-          data.error ||
-            "La préparation n'a pas pu être lancée."
-        );
+        data = {
+          raw: text,
+        };
       }
 
       console.log(
-        "Préparation lancée avec succès :",
+        "DATA API:",
         data
       );
+
+      if (!response.ok) {
+        throw new Error(
+          data?.error ||
+          data?.message ||
+          `Erreur serveur (${response.status})`
+        );
+      }
+
+      if (!data?.success) {
+        throw new Error(
+          data?.error ||
+          data?.message ||
+          "La candidature n'a pas été préparée."
+        );
+      }
+
+      /**
+       * IMPORTANT :
+       * Si n8n ne renvoie pas application_id,
+       * on affiche un avertissement.
+       */
+
+      if (!data.application_id) {
+        console.warn(
+          "⚠️ n8n n'a pas retourné application_id."
+        );
+      }
 
       onSuccess?.();
 
       onClose();
+
+      alert(
+        data.application_id
+          ? "Candidature préparée avec succès."
+          : "La préparation a été envoyée à n8n, mais n8n n'a pas retourné d'application_id."
+      );
+
     } catch (err: unknown) {
+
       console.error(
-        "Erreur préparation candidature :",
+        "Erreur candidature:",
         err
       );
 
       setError(
         err instanceof Error
           ? err.message
-          : "Une erreur est survenue."
+          : "Erreur inconnue."
       );
+
     } finally {
       setLoading(false);
     }
@@ -107,87 +154,201 @@ export function ApplyModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      className="
+        fixed inset-0
+        z-50
+        flex
+        items-center
+        justify-center
+        bg-black/60
+        p-4
+        backdrop-blur-sm
+      "
       onMouseDown={(event) => {
         if (
           event.target ===
-          event.currentTarget &&
+            event.currentTarget &&
           !loading
         ) {
           onClose();
         }
       }}
     >
-      <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-6 text-white shadow-2xl">
 
-        {/* TITLE */}
+      <div
+        className="
+          w-full
+          max-w-md
+          rounded-2xl
+          border border-slate-800
+          bg-slate-900
+          p-6
+          text-white
+          shadow-2xl
+        "
+      >
 
         <h2 className="text-xl font-bold">
           Préparer la candidature
         </h2>
 
-        {/* DESCRIPTION */}
-
-        <p className="mt-2 text-sm leading-6 text-slate-300">
+        <p
+          className="
+            mt-2
+            text-sm
+            leading-6
+            text-slate-300
+          "
+        >
           Vous allez lancer la préparation
           de votre candidature pour :
         </p>
 
-        {/* JOB */}
+        <div
+          className="
+            mt-4
+            rounded-xl
+            border border-slate-800
+            bg-slate-950
+            p-4
+          "
+        >
 
-        <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950 p-4">
-
-          <p className="font-semibold text-blue-400">
+          <p
+            className="
+              font-semibold
+              text-blue-400
+            "
+          >
             {jobTitle}
           </p>
 
           {companyName && (
-            <p className="mt-1 text-sm text-slate-400">
+            <p
+              className="
+                mt-1
+                text-sm
+                text-slate-400
+              "
+            >
               chez {companyName}
             </p>
           )}
 
+          <p
+            className="
+              mt-2
+              text-xs
+              text-slate-600
+            "
+          >
+            Match ID : {jobMatchId}
+          </p>
+
         </div>
 
-        {/* ERROR */}
+        <div
+          className="
+            mt-4
+            rounded-lg
+            border border-blue-500/10
+            bg-blue-500/5
+            p-3
+          "
+        >
+          <p
+            className="
+              text-xs
+              leading-5
+              text-slate-400
+            "
+          >
+            Votre candidature sera préparée
+            automatiquement à partir de votre
+            profil et du matching IA.
+          </p>
+        </div>
 
         {error && (
-          <div className="mt-4 rounded-lg border border-red-500/20 bg-red-500/10 p-3">
-            <p className="text-sm text-red-400">
+
+          <div
+            className="
+              mt-4
+              rounded-lg
+              border border-red-500/20
+              bg-red-500/10
+              p-3
+            "
+          >
+            <p
+              className="
+                text-sm
+                text-red-400
+              "
+            >
               {error}
             </p>
           </div>
+
         )}
 
-        {/* ACTIONS */}
-
-        <div className="mt-6 flex justify-end gap-3">
+        <div
+          className="
+            mt-6
+            flex
+            justify-end
+            gap-3
+          "
+        >
 
           <button
             type="button"
-            onClick={onClose}
             disabled={loading}
-            className="rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={onClose}
+            className="
+              rounded-lg
+              bg-slate-800
+              px-4
+              py-2
+              text-sm
+              font-medium
+              text-slate-300
+              transition
+              hover:bg-slate-700
+              disabled:cursor-not-allowed
+              disabled:opacity-50
+            "
           >
             Annuler
           </button>
 
           <button
             type="button"
-            onClick={
-              handleConfirmApply
-            }
+            onClick={handleConfirmApply}
             disabled={loading}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+            className="
+              rounded-lg
+              bg-blue-600
+              px-4
+              py-2
+              text-sm
+              font-medium
+              text-white
+              transition
+              hover:bg-blue-500
+              disabled:cursor-not-allowed
+              disabled:opacity-50
+            "
           >
             {loading
               ? "Lancement n8n..."
-              : "Confirmer et Préparer"}
+              : "Confirmer et préparer"}
           </button>
 
         </div>
 
       </div>
+
     </div>
   );
 }
