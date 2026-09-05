@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey =
@@ -16,7 +16,19 @@ if (!supabaseAnonKey) {
   );
 }
 
-export const supabase = createClient(
+/**
+ * Client Supabase principal utilisé côté frontend.
+ */
+export const supabase = createSupabaseClient(
   supabaseUrl,
   supabaseAnonKey
 );
+
+/**
+ * Compatibilité avec les fichiers qui utilisent :
+ *
+ * import { createClient } from "@/lib/supabase/client";
+ */
+export function createClient() {
+  return supabase;
+}

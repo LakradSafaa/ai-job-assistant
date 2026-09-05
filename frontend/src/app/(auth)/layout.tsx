@@ -1,16 +1,7 @@
-import "./globals.css";
-
-export default function RootLayout({
+export default function AuthLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return (
-    <html
-      lang="fr"
-      data-scroll-behavior="smooth"
-    >
-      <body>{children}</body>
-    </html>
-  );
+  return <>{children}</>;
 }

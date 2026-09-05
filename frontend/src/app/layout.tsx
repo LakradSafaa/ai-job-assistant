@@ -1,10 +1,9 @@
-import type { Metadata } from "next";
 import "./globals.css";
 
-export const metadata: Metadata = {
+export const metadata = {
   title: "AI Job Assistant",
   description:
-    "Votre copilote intelligent pour trouver, analyser et gérer vos opportunités professionnelles.",
+    "Plateforme intelligente pour rechercher des offres, analyser les correspondances et préparer vos candidatures.",
 };
 
 export default function RootLayout({
@@ -13,7 +12,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="fr">
+    <html lang="fr" data-scroll-behavior="smooth">
       <body>{children}</body>
     </html>
   );
