@@ -1,14 +1,23 @@
+# Environment variables / secrets
+.env
+.env.*
+!.env.example
 
+# n8n data
 n8n_data/
 n8n_data_backup/
 
-n8n_data/
-n8n_data_backup/
+# SQLite
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
 
-*.sqlite
-*.sqlite-shm
-*.sqlite-wal
-n8n_data/
+# Vercel
+.vercel/
+
+# Node
+node_modules/
+
+# Next.js
+.next/
+out/
