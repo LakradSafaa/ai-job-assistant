@@ -15,21 +15,31 @@ import {
   ArrowRight,
   Sparkles,
   ShieldCheck,
+  Briefcase,
+  MapPin,
+  Code2,
 } from "lucide-react";
-
-import { registerUser } from "@/lib/supabase/auth";
+import { createClient } from "@/lib/supabase/client";
 
 type FormState = {
   email: string;
   password: string;
   confirmPassword: string;
+
+  domaine: string;
+  sous_domaine: string;
+  skills: string;
+  experience_level: string;
+  location: string;
+  contract_type: string;
+  remote: string;
 };
 
 export default function RegisterPage() {
   const router = useRouter();
+  const supabase = createClient();
 
   const [loading, setLoading] = useState(false);
-
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] =
     useState(false);
@@ -41,13 +51,16 @@ export default function RegisterPage() {
     email: "",
     password: "",
     confirmPassword: "",
+
+    domaine: "",
+    sous_domaine: "",
+    skills: "",
+    experience_level: "",
+    location: "",
+    contract_type: "",
+    remote: "",
   });
 
-  /**
-   * ---------------------------------------------------------
-   * PASSWORD RULES
-   * ---------------------------------------------------------
-   */
   const passwordRules = {
     minLength: form.password.length >= 8,
     hasNumber: /\d/.test(form.password),
@@ -55,9 +68,8 @@ export default function RegisterPage() {
     hasLowercase: /[a-z]/.test(form.password),
   };
 
-  const passwordScore = Object.values(passwordRules).filter(
-    Boolean
-  ).length;
+  const passwordScore =
+    Object.values(passwordRules).filter(Boolean).length;
 
   const passwordStrength =
     passwordScore === 0
@@ -85,11 +97,6 @@ export default function RegisterPage() {
           width: "100%",
         };
 
-  /**
-   * ---------------------------------------------------------
-   * HANDLE INPUT
-   * ---------------------------------------------------------
-   */
   function updateField(
     field: keyof FormState,
     value: string
@@ -103,11 +110,6 @@ export default function RegisterPage() {
     setSuccess("");
   }
 
-  /**
-   * ---------------------------------------------------------
-   * VALIDATION
-   * ---------------------------------------------------------
-   */
   function validateForm() {
     const email = form.email.trim();
 
@@ -147,14 +149,33 @@ export default function RegisterPage() {
       return "Les mots de passe ne correspondent pas.";
     }
 
+    if (!form.domaine.trim()) {
+      return "Veuillez sélectionner votre domaine professionnel.";
+    }
+
+    if (!form.skills.trim()) {
+      return "Veuillez saisir au moins une compétence.";
+    }
+
+    if (!form.experience_level) {
+      return "Veuillez sélectionner votre niveau d'expérience.";
+    }
+
+    if (!form.location.trim()) {
+      return "Veuillez indiquer votre localisation.";
+    }
+
+    if (!form.contract_type) {
+      return "Veuillez sélectionner le type de contrat recherché.";
+    }
+
+    if (!form.remote) {
+      return "Veuillez sélectionner votre préférence de travail.";
+    }
+
     return null;
   }
 
-  /**
-   * ---------------------------------------------------------
-   * SUBMIT
-   * ---------------------------------------------------------
-   */
   async function handleSubmit(
     e: React.FormEvent<HTMLFormElement>
   ) {
@@ -175,10 +196,38 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
-      const { error: registerError } = await registerUser(
-        form.email.trim().toLowerCase(),
-        form.password
-      );
+      const email = form.email.trim().toLowerCase();
+
+      const skillsArray = form.skills
+        .split(",")
+        .map((skill) => skill.trim())
+        .filter(Boolean);
+
+      /*
+       * 1. Création du compte Supabase Auth
+       */
+      const {
+        data,
+        error: registerError,
+      } = await supabase.auth.signUp({
+        email,
+        password: form.password,
+
+        options: {
+          data: {
+            domaine: form.domaine.trim(),
+            sous_domaine:
+              form.sous_domaine.trim() || null,
+            skills: skillsArray,
+            experience_level:
+              form.experience_level,
+            location: form.location.trim(),
+            contract_type:
+              form.contract_type,
+            remote: form.remote,
+          },
+        },
+      });
 
       if (registerError) {
         console.error(
@@ -186,18 +235,18 @@ export default function RegisterPage() {
           registerError
         );
 
-        let message =
-          "Impossible de créer votre compte.";
-
         const errorMessage =
           registerError.message?.toLowerCase() || "";
 
+        let message =
+          "Impossible de créer votre compte.";
+
         if (
           errorMessage.includes(
-            "user already registered"
+            "already registered"
           ) ||
           errorMessage.includes(
-            "already registered"
+            "user already registered"
           )
         ) {
           message =
@@ -217,7 +266,7 @@ export default function RegisterPage() {
         ) {
           message =
             "Trop de tentatives. Veuillez patienter quelques instants.";
-        } else if (registerError.message) {
+        } else {
           message = registerError.message;
         }
 
@@ -225,17 +274,88 @@ export default function RegisterPage() {
         return;
       }
 
+      if (!data.user) {
+        setError(
+          "Le compte n'a pas pu être créé."
+        );
+        return;
+      }
+
+      /*
+       * Si la confirmation email est activée
+       */
+      if (!data.session) {
+        setSuccess(
+          "Votre compte a été créé. Vérifiez votre email pour confirmer votre adresse."
+        );
+
+        setTimeout(() => {
+          router.push("/login");
+          router.refresh();
+        }, 2500);
+
+        return;
+      }
+
+      /*
+       * 2. Création du profil professionnel
+       */
+      const { error: profileError } =
+        await supabase
+          .from("profiles")
+          .upsert(
+            {
+              id: data.user.id,
+
+              domaine:
+                form.domaine.trim(),
+
+              sous_domaine:
+                form.sous_domaine.trim() || null,
+
+              skills: skillsArray,
+
+              experience_level:
+                form.experience_level,
+
+              location:
+                form.location.trim(),
+
+              contract_type:
+                form.contract_type,
+
+              remote:
+                form.remote,
+
+              updated_at:
+                new Date().toISOString(),
+            },
+            {
+              onConflict: "id",
+            }
+          );
+
+      if (profileError) {
+        console.error(
+          "PROFILE_CREATE_ERROR:",
+          profileError
+        );
+
+        setError(
+          "Votre compte a été créé, mais votre profil professionnel n'a pas pu être enregistré. Vérifiez la structure de la table profiles."
+        );
+
+        return;
+      }
+
       setSuccess(
-        "Votre compte a été créé avec succès. Redirection..."
+        "Votre compte et votre profil ont été créés avec succès ! Redirection..."
       );
 
-      /**
-       * Small delay so the success message is visible.
-       */
       setTimeout(() => {
-        router.push("/onboarding");
+        router.push("/dashboard");
         router.refresh();
-      }, 700);
+      }, 1200);
     } catch (err) {
       console.error(
         "REGISTER_UNEXPECTED_ERROR:",
@@ -255,16 +375,15 @@ export default function RegisterPage() {
   return (
     <main className="min-h-screen bg-slate-50">
       <div className="grid min-h-screen lg:grid-cols-2">
-        {/* ===================================================
-            LEFT — BRANDING
-        ==================================================== */}
+
+        {/* LEFT */}
         <section className="relative hidden overflow-hidden bg-green-600 lg:flex">
-          {/* Decorative background */}
           <div className="absolute -left-24 -top-24 h-72 w-72 rounded-full bg-white/10 blur-2xl" />
+
           <div className="absolute -bottom-32 -right-20 h-96 w-96 rounded-full bg-green-900/20 blur-3xl" />
 
           <div className="relative z-10 flex w-full flex-col justify-between p-12 xl:p-16">
-            {/* Logo */}
+
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white shadow-lg">
                 <Sparkles className="h-5 w-5 text-green-600" />
@@ -281,11 +400,10 @@ export default function RegisterPage() {
               </div>
             </div>
 
-            {/* Main content */}
             <div className="max-w-xl">
               <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium text-white backdrop-blur">
                 <Sparkles className="h-4 w-4" />
-                Votre carrière, propulsée par l'IA
+                Votre carrière, propulsée par l&apos;IA
               </div>
 
               <h1 className="text-4xl font-bold leading-tight text-white xl:text-5xl">
@@ -296,32 +414,30 @@ export default function RegisterPage() {
               </h1>
 
               <p className="mt-6 max-w-lg text-base leading-7 text-green-50">
-                Créez votre profil, découvrez les offres
-                adaptées à vos compétences et générez
-                automatiquement des CV et lettres de
-                motivation personnalisés.
+                Créez votre profil professionnel et
+                laissez notre IA identifier les offres
+                qui correspondent réellement à vos
+                compétences.
               </p>
 
-              {/* Features */}
               <div className="mt-10 space-y-4">
+                <Feature
+                  title="Matching intelligent"
+                  description="Des offres sélectionnées selon votre profil."
+                />
+
                 <Feature
                   title="CV personnalisés"
                   description="Un CV adapté à chaque opportunité."
                 />
 
                 <Feature
-                  title="Lettres de motivation IA"
-                  description="Des lettres adaptées à chaque entreprise."
-                />
-
-                <Feature
-                  title="Suivi des candidatures"
-                  description="Centralisez toutes vos candidatures."
+                  title="Candidatures centralisées"
+                  description="Suivez toutes vos candidatures au même endroit."
                 />
               </div>
             </div>
 
-            {/* Footer */}
             <div className="flex items-center gap-2 text-sm text-green-100">
               <ShieldCheck className="h-4 w-4" />
               Vos données restent protégées
@@ -329,12 +445,11 @@ export default function RegisterPage() {
           </div>
         </section>
 
-        {/* ===================================================
-            RIGHT — REGISTER FORM
-        ==================================================== */}
+        {/* RIGHT */}
         <section className="flex items-center justify-center px-5 py-10 sm:px-8 lg:px-12">
-          <div className="w-full max-w-md">
-            {/* Mobile logo */}
+          <div className="w-full max-w-xl">
+
+            {/* MOBILE LOGO */}
             <div className="mb-8 flex items-center justify-center gap-3 lg:hidden">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-green-100">
                 <Sparkles className="h-5 w-5 text-green-600" />
@@ -351,7 +466,7 @@ export default function RegisterPage() {
               </div>
             </div>
 
-            {/* Header */}
+            {/* HEADER */}
             <div className="mb-8">
               <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-green-100">
                 <UserPlus className="h-6 w-6 text-green-600" />
@@ -362,12 +477,13 @@ export default function RegisterPage() {
               </h2>
 
               <p className="mt-2 text-sm leading-6 text-slate-500">
-                Commencez gratuitement et construisez votre
-                prochaine opportunité professionnelle.
+                Quelques informations nous permettent
+                de personnaliser vos offres et votre
+                matching IA.
               </p>
             </div>
 
-            {/* Error */}
+            {/* ERROR */}
             {error && (
               <div
                 role="alert"
@@ -381,7 +497,7 @@ export default function RegisterPage() {
               </div>
             )}
 
-            {/* Success */}
+            {/* SUCCESS */}
             {success && (
               <div
                 role="status"
@@ -395,249 +511,584 @@ export default function RegisterPage() {
               </div>
             )}
 
-            {/* Form */}
             <form
               onSubmit={handleSubmit}
-              className="space-y-5"
+              className="space-y-6"
             >
-              {/* EMAIL */}
-              <div>
-                <label
-                  htmlFor="email"
-                  className="mb-2 block text-sm font-semibold text-slate-700"
-                >
-                  Adresse email
-                </label>
 
-                <div className="relative">
-                  <Mail className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+              {/* ACCOUNT */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="mb-5">
+                  <h3 className="font-bold text-slate-900">
+                    Informations du compte
+                  </h3>
 
-                  <input
-                    id="email"
-                    name="email"
-                    type="email"
-                    autoComplete="email"
-                    placeholder="vous@exemple.com"
-                    value={form.email}
-                    onChange={(e) =>
-                      updateField(
-                        "email",
-                        e.target.value
-                      )
-                    }
-                    disabled={loading}
-                    className="h-12 w-full rounded-xl border border-slate-200 bg-white pl-12 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-green-500 focus:ring-4 focus:ring-green-500/10 disabled:cursor-not-allowed disabled:bg-slate-100"
-                  />
-                </div>
-              </div>
-
-              {/* PASSWORD */}
-              <div>
-                <label
-                  htmlFor="password"
-                  className="mb-2 block text-sm font-semibold text-slate-700"
-                >
-                  Mot de passe
-                </label>
-
-                <div className="relative">
-                  <Lock className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
-
-                  <input
-                    id="password"
-                    name="password"
-                    type={
-                      showPassword
-                        ? "text"
-                        : "password"
-                    }
-                    autoComplete="new-password"
-                    placeholder="••••••••"
-                    value={form.password}
-                    onChange={(e) =>
-                      updateField(
-                        "password",
-                        e.target.value
-                      )
-                    }
-                    disabled={loading}
-                    className="h-12 w-full rounded-xl border border-slate-200 bg-white pl-12 pr-12 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-green-500 focus:ring-4 focus:ring-green-500/10 disabled:cursor-not-allowed disabled:bg-slate-100"
-                  />
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setShowPassword(
-                        (previous) => !previous
-                      )
-                    }
-                    disabled={loading}
-                    aria-label={
-                      showPassword
-                        ? "Masquer le mot de passe"
-                        : "Afficher le mot de passe"
-                    }
-                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                  >
-                    {showPassword ? (
-                      <EyeOff className="h-5 w-5" />
-                    ) : (
-                      <Eye className="h-5 w-5" />
-                    )}
-                  </button>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Vos informations de connexion.
+                  </p>
                 </div>
 
-                {/* Strength */}
-                {form.password && (
-                  <div className="mt-3">
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className="text-xs text-slate-500">
-                        Force du mot de passe
-                      </span>
+                <div className="space-y-5">
 
-                      <span className="text-xs font-semibold text-slate-700">
-                        {passwordStrength.label}
-                      </span>
-                    </div>
+                  {/* EMAIL */}
+                  <div>
+                    <label
+                      htmlFor="email"
+                      className="mb-2 block text-sm font-semibold text-slate-700"
+                    >
+                      Adresse email
+                    </label>
 
-                    <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
-                      <div
-                        className="h-full rounded-full bg-green-500 transition-all duration-300"
-                        style={{
-                          width:
-                            passwordStrength.width,
-                        }}
+                    <div className="relative">
+                      <Mail className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+
+                      <input
+                        id="email"
+                        type="email"
+                        autoComplete="email"
+                        placeholder="vous@exemple.com"
+                        value={form.email}
+                        onChange={(e) =>
+                          updateField(
+                            "email",
+                            e.target.value
+                          )
+                        }
+                        disabled={loading}
+                        className="h-12 w-full rounded-xl border border-slate-200 bg-white pl-12 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-green-500 focus:ring-4 focus:ring-green-500/10 disabled:bg-slate-100"
                       />
                     </div>
                   </div>
-                )}
+
+                  {/* PASSWORD */}
+                  <div>
+                    <label
+                      htmlFor="password"
+                      className="mb-2 block text-sm font-semibold text-slate-700"
+                    >
+                      Mot de passe
+                    </label>
+
+                    <div className="relative">
+                      <Lock className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+
+                      <input
+                        id="password"
+                        type={
+                          showPassword
+                            ? "text"
+                            : "password"
+                        }
+                        autoComplete="new-password"
+                        placeholder="••••••••"
+                        value={form.password}
+                        onChange={(e) =>
+                          updateField(
+                            "password",
+                            e.target.value
+                          )
+                        }
+                        disabled={loading}
+                        className="h-12 w-full rounded-xl border border-slate-200 bg-white pl-12 pr-12 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-green-500 focus:ring-4 focus:ring-green-500/10 disabled:bg-slate-100"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setShowPassword(
+                            (previous) => !previous
+                          )
+                        }
+                        disabled={loading}
+                        aria-label={
+                          showPassword
+                            ? "Masquer le mot de passe"
+                            : "Afficher le mot de passe"
+                        }
+                        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                      >
+                        {showPassword ? (
+                          <EyeOff className="h-5 w-5" />
+                        ) : (
+                          <Eye className="h-5 w-5" />
+                        )}
+                      </button>
+                    </div>
+
+                    {form.password && (
+                      <div className="mt-3">
+                        <div className="mb-2 flex items-center justify-between">
+                          <span className="text-xs text-slate-500">
+                            Force du mot de passe
+                          </span>
+
+                          <span className="text-xs font-semibold text-slate-700">
+                            {passwordStrength.label}
+                          </span>
+                        </div>
+
+                        <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className="h-full rounded-full bg-green-500 transition-all duration-300"
+                            style={{
+                              width:
+                                passwordStrength.width,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* PASSWORD RULES */}
+                  {form.password && (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="mb-3 text-xs font-semibold text-slate-700">
+                        Votre mot de passe doit contenir :
+                      </p>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <PasswordRule
+                          valid={
+                            passwordRules.minLength
+                          }
+                          text="8 caractères minimum"
+                        />
+
+                        <PasswordRule
+                          valid={
+                            passwordRules.hasUppercase
+                          }
+                          text="Une majuscule"
+                        />
+
+                        <PasswordRule
+                          valid={
+                            passwordRules.hasLowercase
+                          }
+                          text="Une minuscule"
+                        />
+
+                        <PasswordRule
+                          valid={
+                            passwordRules.hasNumber
+                          }
+                          text="Un chiffre"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* CONFIRM */}
+                  <div>
+                    <label
+                      htmlFor="confirmPassword"
+                      className="mb-2 block text-sm font-semibold text-slate-700"
+                    >
+                      Confirmer le mot de passe
+                    </label>
+
+                    <div className="relative">
+                      <Lock className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+
+                      <input
+                        id="confirmPassword"
+                        type={
+                          showConfirmPassword
+                            ? "text"
+                            : "password"
+                        }
+                        autoComplete="new-password"
+                        placeholder="••••••••"
+                        value={form.confirmPassword}
+                        onChange={(e) =>
+                          updateField(
+                            "confirmPassword",
+                            e.target.value
+                          )
+                        }
+                        disabled={loading}
+                        className="h-12 w-full rounded-xl border border-slate-200 bg-white pl-12 pr-12 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-green-500 focus:ring-4 focus:ring-green-500/10 disabled:bg-slate-100"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setShowConfirmPassword(
+                            (previous) => !previous
+                          )
+                        }
+                        disabled={loading}
+                        aria-label={
+                          showConfirmPassword
+                            ? "Masquer la confirmation"
+                            : "Afficher la confirmation"
+                        }
+                        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                      >
+                        {showConfirmPassword ? (
+                          <EyeOff className="h-5 w-5" />
+                        ) : (
+                          <Eye className="h-5 w-5" />
+                        )}
+                      </button>
+                    </div>
+
+                    {form.confirmPassword && (
+                      <div
+                        className={`mt-2 flex items-center gap-1.5 text-xs font-medium ${
+                          form.password ===
+                          form.confirmPassword
+                            ? "text-green-600"
+                            : "text-red-600"
+                        }`}
+                      >
+                        {form.password ===
+                        form.confirmPassword ? (
+                          <>
+                            <Check className="h-3.5 w-3.5" />
+                            Les mots de passe correspondent
+                          </>
+                        ) : (
+                          <>
+                            <X className="h-3.5 w-3.5" />
+                            Les mots de passe ne correspondent pas
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
 
-              {/* PASSWORD REQUIREMENTS */}
-              {form.password && (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <p className="mb-3 text-xs font-semibold text-slate-700">
-                    Votre mot de passe doit contenir :
-                  </p>
+              {/* PROFESSIONAL PROFILE */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="mb-5 flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-green-100">
+                    <Briefcase className="h-5 w-5 text-green-600" />
+                  </div>
 
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <PasswordRule
-                      valid={
-                        passwordRules.minLength
-                      }
-                      text="8 caractères minimum"
-                    />
+                  <div>
+                    <h3 className="font-bold text-slate-900">
+                      Profil professionnel
+                    </h3>
 
-                    <PasswordRule
-                      valid={
-                        passwordRules.hasUppercase
-                      }
-                      text="Une majuscule"
-                    />
-
-                    <PasswordRule
-                      valid={
-                        passwordRules.hasLowercase
-                      }
-                      text="Une minuscule"
-                    />
-
-                    <PasswordRule
-                      valid={
-                        passwordRules.hasNumber
-                      }
-                      text="Un chiffre"
-                    />
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      Ces informations sont utilisées par
+                      notre moteur de matching IA.
+                    </p>
                   </div>
                 </div>
-              )}
 
-              {/* CONFIRM PASSWORD */}
-              <div>
-                <label
-                  htmlFor="confirmPassword"
-                  className="mb-2 block text-sm font-semibold text-slate-700"
-                >
-                  Confirmer le mot de passe
-                </label>
+                <div className="space-y-5">
 
-                <div className="relative">
-                  <Lock className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                  {/* DOMAIN */}
+                  <div>
+                    <label
+                      htmlFor="domaine"
+                      className="mb-2 block text-sm font-semibold text-slate-700"
+                    >
+                      Domaine professionnel *
+                    </label>
 
-                  <input
-                    id="confirmPassword"
-                    name="confirmPassword"
-                    type={
-                      showConfirmPassword
-                        ? "text"
-                        : "password"
-                    }
-                    autoComplete="new-password"
-                    placeholder="••••••••"
-                    value={form.confirmPassword}
-                    onChange={(e) =>
-                      updateField(
-                        "confirmPassword",
-                        e.target.value
-                      )
-                    }
-                    disabled={loading}
-                    className="h-12 w-full rounded-xl border border-slate-200 bg-white pl-12 pr-12 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-green-500 focus:ring-4 focus:ring-green-500/10 disabled:cursor-not-allowed disabled:bg-slate-100"
-                  />
+                    <select
+                      id="domaine"
+                      value={form.domaine}
+                      onChange={(e) =>
+                        updateField(
+                          "domaine",
+                          e.target.value
+                        )
+                      }
+                      disabled={loading}
+                      className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none focus:border-green-500 focus:ring-4 focus:ring-green-500/10"
+                    >
+                      <option value="">
+                        Sélectionnez votre domaine
+                      </option>
 
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setShowConfirmPassword(
-                        (previous) => !previous
-                      )
-                    }
-                    disabled={loading}
-                    aria-label={
-                      showConfirmPassword
-                        ? "Masquer la confirmation"
-                        : "Afficher la confirmation"
-                    }
-                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                  >
-                    {showConfirmPassword ? (
-                      <EyeOff className="h-5 w-5" />
-                    ) : (
-                      <Eye className="h-5 w-5" />
-                    )}
-                  </button>
-                </div>
+                      <option value="Informatique">
+                        Informatique
+                      </option>
 
-                {form.confirmPassword && (
-                  <div
-                    className={`mt-2 flex items-center gap-1.5 text-xs font-medium ${
-                      form.password ===
-                      form.confirmPassword
-                        ? "text-green-600"
-                        : "text-red-600"
-                    }`}
-                  >
-                    {form.password ===
-                    form.confirmPassword ? (
-                      <>
-                        <Check className="h-3.5 w-3.5" />
-                        Les mots de passe correspondent
-                      </>
-                    ) : (
-                      <>
-                        <X className="h-3.5 w-3.5" />
-                        Les mots de passe ne correspondent
-                        pas
-                      </>
-                    )}
+                      <option value="Intelligence Artificielle">
+                        Intelligence Artificielle
+                      </option>
+
+                      <option value="Data Science">
+                        Data Science
+                      </option>
+
+                      <option value="Big Data">
+                        Big Data
+                      </option>
+
+                      <option value="Développement Web">
+                        Développement Web
+                      </option>
+
+                      <option value="Cloud Computing">
+                        Cloud Computing
+                      </option>
+
+                      <option value="DevOps">
+                        DevOps
+                      </option>
+
+                      <option value="Cybersécurité">
+                        Cybersécurité
+                      </option>
+
+                      <option value="Marketing">
+                        Marketing
+                      </option>
+
+                      <option value="Finance">
+                        Finance
+                      </option>
+
+                      <option value="Ressources Humaines">
+                        Ressources Humaines
+                      </option>
+
+                      <option value="Commerce">
+                        Commerce
+                      </option>
+
+                      <option value="Autre">
+                        Autre
+                      </option>
+                    </select>
                   </div>
-                )}
+
+                  {/* SUBDOMAIN */}
+                  <div>
+                    <label
+                      htmlFor="sous_domaine"
+                      className="mb-2 block text-sm font-semibold text-slate-700"
+                    >
+                      Spécialité / Sous-domaine
+                    </label>
+
+                    <input
+                      id="sous_domaine"
+                      type="text"
+                      placeholder="Ex : NLP, Machine Learning, Backend..."
+                      value={form.sous_domaine}
+                      onChange={(e) =>
+                        updateField(
+                          "sous_domaine",
+                          e.target.value
+                        )
+                      }
+                      disabled={loading}
+                      className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-green-500 focus:ring-4 focus:ring-green-500/10"
+                    />
+                  </div>
+
+                  {/* SKILLS */}
+                  <div>
+                    <label
+                      htmlFor="skills"
+                      className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"
+                    >
+                      <Code2 className="h-4 w-4 text-green-600" />
+                      Compétences *
+                    </label>
+
+                    <input
+                      id="skills"
+                      type="text"
+                      placeholder="Python, SQL, React, Docker, NLP..."
+                      value={form.skills}
+                      onChange={(e) =>
+                        updateField(
+                          "skills",
+                          e.target.value
+                        )
+                      }
+                      disabled={loading}
+                      className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-green-500 focus:ring-4 focus:ring-green-500/10"
+                    />
+
+                    <p className="mt-2 text-xs text-slate-400">
+                      Séparez les compétences par des virgules.
+                    </p>
+                  </div>
+
+                  {/* EXPERIENCE */}
+                  <div>
+                    <label
+                      htmlFor="experience_level"
+                      className="mb-2 block text-sm font-semibold text-slate-700"
+                    >
+                      Niveau d&apos;expérience *
+                    </label>
+
+                    <select
+                      id="experience_level"
+                      value={form.experience_level}
+                      onChange={(e) =>
+                        updateField(
+                          "experience_level",
+                          e.target.value
+                        )
+                      }
+                      disabled={loading}
+                      className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none focus:border-green-500 focus:ring-4 focus:ring-green-500/10"
+                    >
+                      <option value="">
+                        Sélectionnez votre niveau
+                      </option>
+
+                      <option value="Étudiant">
+                        Étudiant
+                      </option>
+
+                      <option value="Junior">
+                        Junior
+                      </option>
+
+                      <option value="Intermédiaire">
+                        Intermédiaire
+                      </option>
+
+                      <option value="Senior">
+                        Senior
+                      </option>
+
+                      <option value="Expert">
+                        Expert
+                      </option>
+                    </select>
+                  </div>
+
+                  {/* LOCATION */}
+                  <div>
+                    <label
+                      htmlFor="location"
+                      className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"
+                    >
+                      <MapPin className="h-4 w-4 text-green-600" />
+                      Localisation *
+                    </label>
+
+                    <input
+                      id="location"
+                      type="text"
+                      placeholder="Ex : Casablanca, Maroc"
+                      value={form.location}
+                      onChange={(e) =>
+                        updateField(
+                          "location",
+                          e.target.value
+                        )
+                      }
+                      disabled={loading}
+                      className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-green-500 focus:ring-4 focus:ring-green-500/10"
+                    />
+                  </div>
+
+                  {/* CONTRACT */}
+                  <div>
+                    <label
+                      htmlFor="contract_type"
+                      className="mb-2 block text-sm font-semibold text-slate-700"
+                    >
+                      Type de contrat recherché *
+                    </label>
+
+                    <select
+                      id="contract_type"
+                      value={form.contract_type}
+                      onChange={(e) =>
+                        updateField(
+                          "contract_type",
+                          e.target.value
+                        )
+                      }
+                      disabled={loading}
+                      className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none focus:border-green-500 focus:ring-4 focus:ring-green-500/10"
+                    >
+                      <option value="">
+                        Sélectionnez
+                      </option>
+
+                      <option value="CDI">
+                        CDI
+                      </option>
+
+                      <option value="CDD">
+                        CDD
+                      </option>
+
+                      <option value="Stage">
+                        Stage
+                      </option>
+
+                      <option value="Alternance">
+                        Alternance
+                      </option>
+
+                      <option value="Freelance">
+                        Freelance
+                      </option>
+
+                      <option value="Tous">
+                        Tous
+                      </option>
+                    </select>
+                  </div>
+
+                  {/* REMOTE */}
+                  <div>
+                    <label
+                      htmlFor="remote"
+                      className="mb-2 block text-sm font-semibold text-slate-700"
+                    >
+                      Mode de travail *
+                    </label>
+
+                    <select
+                      id="remote"
+                      value={form.remote}
+                      onChange={(e) =>
+                        updateField(
+                          "remote",
+                          e.target.value
+                        )
+                      }
+                      disabled={loading}
+                      className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none focus:border-green-500 focus:ring-4 focus:ring-green-500/10"
+                    >
+                      <option value="">
+                        Sélectionnez
+                      </option>
+
+                      <option value="Présentiel">
+                        Présentiel
+                      </option>
+
+                      <option value="Hybride">
+                        Hybride
+                      </option>
+
+                      <option value="Remote">
+                        Remote
+                      </option>
+
+                      <option value="Tous">
+                        Tous
+                      </option>
+                    </select>
+                  </div>
+                </div>
               </div>
 
               {/* TERMS */}
               <p className="text-xs leading-5 text-slate-500">
                 En créant un compte, vous acceptez les
-                conditions d'utilisation et la politique de
+                conditions d&apos;utilisation et la politique de
                 confidentialité de la plateforme.
               </p>
 
@@ -650,7 +1101,7 @@ export default function RegisterPage() {
                 {loading ? (
                   <>
                     <Loader2 className="h-5 w-5 animate-spin" />
-                    Création du compte...
+                    Création du profil...
                   </>
                 ) : (
                   <>
@@ -667,14 +1118,14 @@ export default function RegisterPage() {
                 Vous avez déjà un compte ?{" "}
                 <Link
                   href="/login"
-                  className="font-semibold text-green-600 transition hover:text-green-700"
+                  className="font-semibold text-green-600 hover:text-green-700"
                 >
                   Se connecter
                 </Link>
               </p>
             </div>
 
-            {/* Security */}
+            {/* SECURITY */}
             <div className="mt-6 flex items-center justify-center gap-2 text-xs text-slate-400">
               <ShieldCheck className="h-4 w-4" />
               Inscription sécurisée
@@ -686,11 +1137,6 @@ export default function RegisterPage() {
   );
 }
 
-/**
- * ---------------------------------------------------------
- * FEATURE COMPONENT
- * ---------------------------------------------------------
- */
 function Feature({
   title,
   description,
@@ -717,11 +1163,6 @@ function Feature({
   );
 }
 
-/**
- * ---------------------------------------------------------
- * PASSWORD RULE
- * ---------------------------------------------------------
- */
 function PasswordRule({
   valid,
   text,
