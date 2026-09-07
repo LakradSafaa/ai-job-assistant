@@ -82,6 +82,14 @@ type Job = {
 
   link?: string | null;
 
+  /*
+   * IMPORTANT :
+   * apply_url est conservé dans le type car le matching n8n
+   * peut éventuellement le retourner.
+   *
+   * MAIS il n'est PAS demandé dans la requête Supabase
+   * principale car la colonne n'existe pas dans jobs.
+   */
   apply_url?: string | null;
 
   /*
@@ -311,7 +319,7 @@ export default function JobsPage() {
 
   /* ==========================================================
      COMPANY NAME
-     
+
      IMPORTANT :
      On NE fait plus de requête automatique vers companies
      pendant le chargement de /jobs.
@@ -425,7 +433,7 @@ export default function JobsPage() {
 
   /* ==========================================================
      LOAD ALL JOBS
-============================================================ */
+  ========================================================== */
 
   const fetchJobs =
     useCallback(
@@ -456,6 +464,7 @@ export default function JobsPage() {
            * Pas de company_id ici.
            * Pas de company.
            * Pas de domain.
+           * Pas de apply_url.
            */
 
           const {
@@ -482,7 +491,6 @@ export default function JobsPage() {
                 external_id,
                 url,
                 link,
-                apply_url,
                 domaine,
                 sous_domaine,
                 classification_score
@@ -673,10 +681,10 @@ export default function JobsPage() {
 
   /* ==========================================================
      MATCHING IA
-     
+
      IMPORTANT :
      Cette logique reste intacte.
-============================================================ */
+  ========================================================== */
 
   const handleRunMatching =
     async () => {
